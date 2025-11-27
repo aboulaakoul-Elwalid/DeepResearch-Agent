@@ -1,0 +1,9 @@
+# Core dependencies for Shamela book extraction
+datasets>=2.14.0
+pandas>=2.0.0
+pyarrow>=12.0.0
+huggingface-hub>=0.16.0
+
+# Optional: For better progress bars and visualization
+tqdm>=4.65.0
+sentence-transformers>=2.2.2

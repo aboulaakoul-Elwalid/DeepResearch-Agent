@@ -1,0 +1,64 @@
+# Python virtual environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Jupyter/IPython
+.ipynb_checkpoints/
+
+# VSCode and IDE settings
+.vscode/
+.idea/
+*.swp
+
+# OS/Editor temp files
+*.bak
+*.tmp
+*.log
+*.DS_Store
+Thumbs.db
+
+# Output data and artifacts
+output/assembled_books/
+output/clean_books/
+output/chunks/
+output/embeddings/
+output/tmp/
+output/stats/
+output/manifest/
+output/metadata/
+output/selected_books.csv
+output/assembled_books_index.csv
+
+# Parquet and large data files
+*.parquet
+
+# Model weights and cache
+*.safetensors
+*.pt
+*.pth
+.cache/
+datasets/
+
+# Ignore DR-Tulu subproject outputs if any
+DR-Tulu/output/
+DR-Tulu/.venv/
+DR-Tulu/__pycache__/
+
+# Ignore deployment artifacts
+deploy/.env
+deploy/.DS_Store
+
+# Ignore CSVs and lists that are regenerated
+list-of-book-titles.csv
+
+# Ignore lock files
+*.lock
+
+# Ignore shell history
+*.sh_history
+
+# End of file
