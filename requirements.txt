@@ -1,3 +1,5 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 # Core dependencies for Shamela book extraction
 datasets>=2.14.0
 pandas>=2.0.0
@@ -8,3 +10,7 @@ huggingface-hub>=0.16.0
 tqdm>=4.65.0
 sentence-transformers>=2.2.2
 chromadb>=0.5.4,<0.6
+
+# Torch (CPU-only build; install via the PyTorch CPU index)
+# Hint: pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple torch==2.5.1+cpu
+torch==2.5.1+cpu
