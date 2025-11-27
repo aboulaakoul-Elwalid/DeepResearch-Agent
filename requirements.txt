@@ -7,3 +7,4 @@ huggingface-hub>=0.16.0
 # Optional: For better progress bars and visualization
 tqdm>=4.65.0
 sentence-transformers>=2.2.2
+chromadb>=0.5.4,<0.6

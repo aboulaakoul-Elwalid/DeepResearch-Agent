@@ -1,0 +1,238 @@
+{
+  "generated_at": "2025-11-27T14:45:30.396673+00:00",
+  "total_samples": 12,
+  "files": [
+    {
+      "parquet_path": "output/embeddings/per_book/43.parquet",
+      "sample_count": 3,
+      "samples": [
+        {
+          "chunk_id": "43-8488",
+          "issues": [],
+          "text_preview": "قال ذلك: 9935 - حدثني محمد بن عمرو قال، حدثنا ابو عاصم، عن عيسي، عن ابن ابي نجيح، عن مجاهد في قوله:\"وان منكم لمن ليبطين فان اصابتكم مصيبة\" الي قوله:\"فسوف نوتيه اجرًا عظيمًا\"، ما بين ذلك في المنافقين. ",
+          "metadata": {
+            "book_id": "43",
+            "book_title": "جامع البيان عن تأويل آي القرآن",
+            "collection_label": "Tafsir",
+            "page_start": 536,
+            "page_end": 539
+          },
+          "text_length_chars": 1158,
+          "embedding_dim": 384,
+          "embedding_norm": 1.000000099260472
+        },
+        {
+          "chunk_id": "43-9528",
+          "issues": [],
+          "text_preview": "جانف لاثم\"، غير متعمد لاثم، غير متعرِّض. 11123- حدثنا محمد بن الحسين قال، حدثنا احمد بن المفضل قال، حدثنا اسباط، عن السدي:\"غير متجانف لاثم\"، يقول: غير متعرض لاثم، اي: يبتغي فيه شهوة، او يعتدي في اكله.",
+          "metadata": {
+            "book_id": "43",
+            "book_title": "جامع البيان عن تأويل آي القرآن",
+            "collection_label": "Tafsir",
+            "page_start": 534,
+            "page_end": 536
+          },
+          "text_length_chars": 488,
+          "embedding_dim": 384,
+          "embedding_norm": 1.0000000490571568
+        },
+        {
+          "chunk_id": "43-22455",
+          "issues": [],
+          "text_preview": "ِلْدَانُ، وَتَطِيرُ الشَّيَاطِينُ هَارِبَةً حتي تاتي الاقْطارَ، فَتَلَقَّاها المَلايِكَةُ، فَتَضْرِبُ وُجُوهَها، فَتَرْجِعَ وَيُوَلِّي النَّاسُ مُدْبِرِينَ، يُنَادِي بَعْضُهُمْ بَعْضًا، وَهُوَ الَّذِي",
+          "metadata": {
+            "book_id": "43",
+            "book_title": "جامع البيان عن تأويل آي القرآن",
+            "collection_label": "Tafsir",
+            "page_start": 378,
+            "page_end": 380
+          },
+          "text_length_chars": 224,
+          "embedding_dim": 384,
+          "embedding_norm": 1.0000001332077153
+        }
+      ],
+      "problem_chunk_count": 0,
+      "issue_count": 0,
+      "total_text_length_chars": 1870,
+      "avg_text_length_chars": 623.3333333333334,
+      "embedding_dim": 384,
+      "avg_embedding_norm": 1.0000000938417815,
+      "ready_for_ingestion": true
+    },
+    {
+      "parquet_path": "output/embeddings/per_book/4445.parquet",
+      "sample_count": 3,
+      "samples": [
+        {
+          "chunk_id": "4445-8488",
+          "issues": [],
+          "text_preview": "وْلِهِ تَعَالَي: خُذِ الْعَفْوَ وَاْمُرْ بِالْعُرْفِ وَاَعْرِضْ عَنِ الْجَاهِلِينَ [الْاَعْرَافِ: 199] قَالَ: اُمِرَ رَسُولُ اللَّهِ صلي الله عليه وسلم اَنْ يَاْخُذَ الْعَفْوَ مِنْ اَخْلَاقِ النَّاسِ.",
+          "metadata": {
+            "book_id": "4445",
+            "book_title": "البداية والنهاية",
+            "collection_label": "Tarikh",
+            "page_start": 455,
+            "page_end": 457
+          },
+          "text_length_chars": 224,
+          "embedding_dim": 384,
+          "embedding_norm": 0.9999996595619918
+        },
+        {
+          "chunk_id": "4445-9528",
+          "issues": [],
+          "text_preview": "ْهُ، وَقَدْ وَافَقَ اَبَا الْجَلْدِ طَايِفَةٌ مِنَ الْعُلَمَاءِ، وَلَعَلَّ قَوْلَهُ اَرْجَحُ; لِمَا ذَكَرْنَا، وَقَدْ كَانَ يَنْظُرُ فِي شَيْءٍ مِنَ الْكُتُبِ الْمُتَقَدِّمَةِ.    > **Foo no e:** None",
+          "metadata": {
+            "book_id": "4445",
+            "book_title": "البداية والنهاية",
+            "collection_label": "Tarikh",
+            "page_start": 286,
+            "page_end": 289
+          },
+          "text_length_chars": 1333,
+          "embedding_dim": 384,
+          "embedding_norm": 1.0000003046377013
+        },
+        {
+          "chunk_id": "4445-22455",
+          "issues": [],
+          "text_preview": "رَكَنَّ اَحَدٌ فَلْيَاْتِ النَّهْرَ الَّذِي يَرَاهُ نَارًا وَلِيُغَمِّضْ، ثُمَّ لِيُطَاْطِيْ رَاْسَهُ، فَيَشْرَبَ مِنْهُ، فَاِنَّهُ مَاءٌ بَارِدٌ، وَاِنَّ الدَّجَّالَ مَمْسُوحُ    > **Foo no e:** None",
+          "metadata": {
+            "book_id": "4445",
+            "book_title": "البداية والنهاية",
+            "collection_label": "Tarikh",
+            "page_start": 121,
+            "page_end": 124
+          },
+          "text_length_chars": 1272,
+          "embedding_dim": 384,
+          "embedding_norm": 1.000000041255401
+        }
+      ],
+      "problem_chunk_count": 0,
+      "issue_count": 0,
+      "total_text_length_chars": 2829,
+      "avg_text_length_chars": 943.0,
+      "embedding_dim": 384,
+      "avg_embedding_norm": 1.0000000018183648,
+      "ready_for_ingestion": true
+    },
+    {
+      "parquet_path": "output/embeddings/per_book/5423.parquet",
+      "sample_count": 3,
+      "samples": [
+        {
+          "chunk_id": "5423-4244",
+          "issues": [],
+          "text_preview": "تْلُهَا الدَّفْعُ، وَبِدُونِ الْقَتْلِ هَهُنَا يَحْصُلُ الْمَقْصُودُ اذَا حُبِسَتْ وَاُجْبِرَتْ كَمَا بَيَّنَّا عَلَي الْاِسْلَامِ، وَاَمَّا الرِّقُّ لَا يَمْنَعُ الْقَتْلَ فِي    > **Foo no e:** None",
+          "metadata": {
+            "book_id": "5423",
+            "book_title": "المبسوط",
+            "collection_label": "Fiqh (Hanafi)",
+            "page_start": 108,
+            "page_end": 111
+          },
+          "text_length_chars": 3632,
+          "embedding_dim": 384,
+          "embedding_norm": 0.9999997582373291
+        },
+        {
+          "chunk_id": "5423-4764",
+          "issues": [],
+          "text_preview": "َابُ، وَصَلَّي اللَّهُ عَلَي سَيِّدِنَا مُحَمَّدٍ النَّبِيِّ الْاُمِّيِّ وَعَلَي الِهِ وَصَحْبِهِ وَسَلِّمْ تَسْلِيمًا كَثِيرًا. ‌ ‌[كِتَابُ الشَّرِكَةِ] بسم الله الرحمن الرحيم    > **Foo no e:** None",
+          "metadata": {
+            "book_id": "5423",
+            "book_title": "المبسوط",
+            "collection_label": "Fiqh (Hanafi)",
+            "page_start": 148,
+            "page_end": 151
+          },
+          "text_length_chars": 2503,
+          "embedding_dim": 384,
+          "embedding_norm": 1.000000152933967
+        },
+        {
+          "chunk_id": "5423-11228",
+          "issues": [],
+          "text_preview": "تَدْبِيرُهُ بَاطِلٌ؛ لِاَنَّهُ لَا يَمْلِكُ اعْتَاقَهَا عَنْ نَفْسِهِ فَلَا يَمْلِكُ تَدْبِيرَهَا عَنْ نَفْسِهِ اَيْضًا وَلَيْسَ فِي التَّدْبِيرِ تَنْفِيذُ وَصِيَّةِ الْمَيِّتِ    > **Foo no e:** None",
+          "metadata": {
+            "book_id": "5423",
+            "book_title": "المبسوط",
+            "collection_label": "Fiqh (Hanafi)",
+            "page_start": 43,
+            "page_end": 46
+          },
+          "text_length_chars": 3770,
+          "embedding_dim": 384,
+          "embedding_norm": 0.9999997199683966
+        }
+      ],
+      "problem_chunk_count": 0,
+      "issue_count": 0,
+      "total_text_length_chars": 9905,
+      "avg_text_length_chars": 3301.6666666666665,
+      "embedding_dim": 384,
+      "avg_embedding_norm": 0.9999998770465642,
+      "ready_for_ingestion": true
+    },
+    {
+      "parquet_path": "output/embeddings/per_book/735.parquet",
+      "sample_count": 3,
+      "samples": [
+        {
+          "chunk_id": "735-2122",
+          "issues": [],
+          "text_preview": "زَادَ فَلِي وَاِنْ نَقَصَ فَعَلَيَّ. قَالَ: وَحَدَّثَنِي زَيْدُ بْنُ ثَابِتٍ: اَنَّ النَّبِيَّ صلي الله عليه وسلم رَخَّصَ فِي الْعَرَايَا بِخَرْصِهَا. [2072، 2073، 2076، 2080، 2091، 2251، وانظر: 1415]",
+          "metadata": {
+            "book_id": "735",
+            "book_title": "صحيح البخاري",
+            "collection_label": "Hadith",
+            "page_start": 760,
+            "page_end": 761
+          },
+          "text_length_chars": 590,
+          "embedding_dim": 384,
+          "embedding_norm": 0.9999999116854508
+        },
+        {
+          "chunk_id": "735-2382",
+          "issues": [],
+          "text_preview": "َكْرَهُمْ وَعِنْدَ اللَّهِ مَكْرُهُمْ وَاِنْ كَانَ مَكْرُهُمْ لِتَزُولَ مِنْهُ الْجِبَالُ. فَلا تَحْسَبَنَّ اللَّهَ مُخْلِفَ وَعْدِهِ رُسُلَهُ اِنَّ اللَّهَ عَزِيزٌ ذُو انْتِقَامٍ} /ابراهيم: 42 - 47/.",
+          "metadata": {
+            "book_id": "735",
+            "book_title": "صحيح البخاري",
+            "collection_label": "Hadith",
+            "page_start": 861,
+            "page_end": 861
+          },
+          "text_length_chars": 901,
+          "embedding_dim": 384,
+          "embedding_norm": 0.9999998547858964
+        },
+        {
+          "chunk_id": "735-5614",
+          "issues": [],
+          "text_preview": "Foo no e:** 1. (الخزيرة) قيل: طعام مصنوع من دقيق وسمن يحلي بشيء، وقيل: لحم مقطع يطبخ ثم يذر عليه دقيق، وقيل غير ذلك. (النخالة) قشر الحب الذي يبقي منه بعدما يطحن وينخل. (اللبن) وقيل: الحريرة من الدقيق.",
+          "metadata": {
+            "book_id": "735",
+            "book_title": "صحيح البخاري",
+            "collection_label": "Hadith",
+            "page_start": 2062,
+            "page_end": 2063
+          },
+          "text_length_chars": 2098,
+          "embedding_dim": 384,
+          "embedding_norm": 1.0000002986665384
+        }
+      ],
+      "problem_chunk_count": 0,
+      "issue_count": 0,
+      "total_text_length_chars": 3589,
+      "avg_text_length_chars": 1196.3333333333333,
+      "embedding_dim": 384,
+      "avg_embedding_norm": 1.0000000217126284,
+      "ready_for_ingestion": true
+    }
+  ]
+}

@@ -62,3 +62,4 @@ list-of-book-titles.csv
 *.sh_history
 
 # End of file
+chroma_db/
