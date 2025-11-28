@@ -86,6 +86,14 @@ def search_arabic_books(
         if ids and ids[0] and idx < len(ids[0]):
             record_id = ids[0][idx]
 
+        book_id = metadata.get("book_id")
+        if (not book_id) and record_id:
+            base_id = record_id.split("-", 1)[0]
+            if base_id:
+                metadata = dict(metadata)
+                metadata["book_id"] = base_id
+                book_id = base_id
+
         distance = None
         if distances and distances[0] and idx < len(distances[0]):
             distance = distances[0][idx]
@@ -93,6 +101,7 @@ def search_arabic_books(
         payload.append(
             {
                 "id": record_id,
+                "book_id": book_id,
                 "text": doc,
                 "metadata": metadata,
                 "distance": distance,

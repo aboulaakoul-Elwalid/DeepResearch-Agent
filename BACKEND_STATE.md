@@ -14,7 +14,7 @@ Last updated: now
 ```bash
 cd /home/elwalid/projects/parallax_project/DR-Tulu/agent
 source activate.sh  # loads GOOGLE_AI_API_KEY
-GOOGLE_API_KEY=$GOOGLE_AI_API_KEY LITELLM_MODEL=gemini-2.0-flash uvicorn scripts.openai_gateway:app --host 0.0.0.0 --port 3001
+GOOGLE_API_KEY=$GOOGLE_AI_API_KEY LITELLM_MODEL=gemini-1.5-flash-latest uvicorn scripts.openai_gateway:app --host 0.0.0.0 --port 3001
 ```
 - This exposes:
   - `GET /cluster/status` → 200
