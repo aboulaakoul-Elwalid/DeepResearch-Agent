@@ -6,8 +6,8 @@ Last updated: now
 - Primary model: **Gemini** via `gemini/gemini-2.0-flash` (Modal/Parallax endpoint currently down).
 - DR-Tulu configs:
   - `DR-Tulu/agent/workflows/auto_search_deep.yaml` — deep research (tool_calls=20, browse on, long_form prompt).
-  - `DR-Tulu/agent/workflows/auto_search_basic.yaml` — fast/light search.
-  - `DR-Tulu/agent/workflows/auto_search_parallax.yaml` — uses Modal if up, otherwise falls back to Gemini.
+- `DR-Tulu/agent/workflows/auto_search_basic.yaml` — fast/light search.
+- `DR-Tulu/agent/workflows/auto_search_parallax.yaml` — uses Modal if up, otherwise falls back to Gemini.
 - Gateway for the UI: `DR-Tulu/agent/scripts/openai_gateway.py` (OpenAI-compatible, adds `/cluster/status` for Vite health).
 
 ## How to start the backend for the UI
@@ -47,3 +47,8 @@ source DR-Tulu/agent/activate.sh
 uvicorn dr_tulu_agent_server:app --host 0.0.0.0 --port 3001
 ```
 - Point the UI endpoint to `http://localhost:3001` to get tool-enabled DR-Tulu responses.
+- Endpoints exposed:
+  - `/v1/models` and `/model/list` → `dr-tulu` + `gemini/...`
+  - `/cluster/status` (NDJSON, status=available)
+  - `/scheduler/init` no-op
+  - `/v1/chat/completions` — streams SSE; `dr-tulu` runs the agent with tool_calls; `gemini/...` uses AI Studio API key passthrough.
