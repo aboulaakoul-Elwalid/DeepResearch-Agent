@@ -32,3 +32,18 @@ If Modal/Parallax comes back, point the UI endpoint to `https://aboulaakoul-elwa
 - Network: external calls (Gemini, Serper, S2, Exa) require outbound DNS/HTTPS.
 - Arabic Chroma tool: needs `chromadb` installed and the collection path set; currently disabled in configs.
 - If you need DR-Tulu traces (tool_call messages) instead of raw Gemini, we should extend the gateway to wrap the `auto_search_deep` workflow; current gateway is a thin litellm front for the UI to unblock. 
+
+## DR-Tulu agent HTTP shim (tool-enabled)
+- New server: `dr_tulu_agent_server.py` (in repo root)
+- Exposes:
+  - `GET /model/list` → model `dr-tulu-agent`
+  - `POST /scheduler/init` → ok
+  - `GET /cluster/status` (NDJSON) → status available
+  - `POST /v1/chat/completions` → runs `auto_search_deep` and streams one chunk with content + tool_calls (plus tool role messages)
+- Run:
+```bash
+cd /home/elwalid/projects/parallax_project
+source DR-Tulu/agent/activate.sh
+uvicorn dr_tulu_agent_server:app --host 0.0.0.0 --port 3001
+```
+- Point the UI endpoint to `http://localhost:3001` to get tool-enabled DR-Tulu responses.
