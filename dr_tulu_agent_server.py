@@ -321,6 +321,7 @@ async def chat_completions(request: Request):
     run_task = asyncio.create_task(_run_agent(user_msg, step_callback=step_cb))
 
     async def stream():
+        nonlocal total_events
         try:
             while True:
                 try:
