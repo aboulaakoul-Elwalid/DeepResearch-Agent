@@ -273,6 +273,7 @@ async def chat_completions(request: Request):
 
     # Streaming via step_callback to surface tool calls/results progressively
     event_queue: asyncio.Queue = asyncio.Queue()
+    seen_urls: set[str] = set()
     tool_idx = 0
 
     async def step_cb(generated_text: str, tool_outputs: List[Any]):
@@ -282,6 +283,12 @@ async def chat_completions(request: Request):
         for t in tool_outputs or []:
             call_id = f"call_{tool_idx}"
             tool_idx += 1
+            # Basic dedupe for browse_webpage repeated on same URL
+            url = getattr(t, "url", None) or getattr(t, "source_url", None) or None
+            if url:
+                if url in seen_urls:
+                    continue
+                seen_urls.add(url)
             await event_queue.put(("tool", call_id, t))
 
     run_task = asyncio.create_task(_run_agent(user_msg, step_callback=step_cb))
