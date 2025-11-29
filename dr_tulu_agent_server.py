@@ -49,7 +49,11 @@ AVAILABLE_MODELS = [DR_TULU_MODEL, GEMINI_MODEL]
 CONFIG_PATH = DR_TULU_AGENT / "workflows" / "auto_search_deep.yaml"
 GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_AI_API_KEY")
 GEMINI_API_BASE = os.getenv("GOOGLE_API_BASE", "https://generativelanguage.googleapis.com")
-MAX_TOOL_EVENTS = int(os.getenv("DR_TULU_MAX_TOOL_EVENTS", "40"))
+MAX_TOOL_EVENTS = int(os.getenv("DR_TULU_MAX_TOOL_EVENTS", "25"))
+# Maximum docs per tool result to forward
+MAX_DOCS_PER_TOOL = int(os.getenv("DR_TULU_MAX_DOCS_PER_TOOL", "5"))
+# Maximum characters per text/snippet to forward
+MAX_CONTENT_CHARS = int(os.getenv("DR_TULU_MAX_CONTENT_CHARS", "1200"))
 
 app = FastAPI(title="DR-Tulu Agent Gateway", version="0.1.0")
 app.add_middleware(
@@ -145,18 +149,25 @@ def _tool_messages(outputs: List[Any]) -> List[Dict[str, Any]]:
         name = getattr(t, "tool_name", getattr(t, "name", f"tool-{idx}"))
         content = ""
         if isinstance(t, ToolOutput):
-            content = t.output or ""
+            content = _clean_text(t.output or "")
         elif isinstance(t, DocumentToolOutput):
             docs = []
+            seen = set()
             for d in t.documents or []:
+                key = (d.url, d.title)
+                if key in seen:
+                    continue
+                seen.add(key)
                 docs.append(
                     {
                         "title": d.title,
                         "url": d.url,
-                        "snippet": d.snippet,
+                        "snippet": _clean_text(d.snippet or ""),
                         "score": d.score,
                     }
                 )
+                if len(docs) >= MAX_DOCS_PER_TOOL:
+                    break
             content = json.dumps({"documents": docs})
         msgs.append({"role": "tool", "tool_call_id": f"call_{idx}", "name": name, "content": content})
     return msgs
@@ -189,6 +200,9 @@ _STRIP_PATTERNS = [
     (r"<answer>", ""),  # answer wrappers
     (r"</answer>", ""),
     (r"<raw_trace>.*?</raw_trace>", ""),
+    (r"!\[Image [0-9]+\]", ""),
+    (r"\[!\[Image[^\]]*\]\([^\)]*\)\]", ""),
+    (r"^(Submitted by|Uploaded by|View PDF).*?$", ""),
 ]
 
 
@@ -201,6 +215,9 @@ def _clean_text(s: str) -> str:
     # Collapse whitespace
     cleaned = re.sub(r"\s+\n", "\n", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    # Trim overly long content
+    if len(cleaned) > MAX_CONTENT_CHARS:
+        cleaned = cleaned[:MAX_CONTENT_CHARS] + "…"
     return cleaned.strip()
 
 
@@ -392,18 +409,25 @@ async def chat_completions(request: Request):
                     content = ""
                     name = getattr(t, "tool_name", getattr(t, "name", "tool"))
                     if isinstance(t, ToolOutput):
-                        content = t.output or ""
+                        content = _clean_text(t.output or "")
                     elif isinstance(t, DocumentToolOutput):
                         docs = []
+                        seen = set()
                         for d in t.documents or []:
+                            key = (d.url, d.title)
+                            if key in seen:
+                                continue
+                            seen.add(key)
                             docs.append(
                                 {
                                     "title": d.title,
                                     "url": d.url,
-                                    "snippet": d.snippet,
+                                    "snippet": _clean_text(d.snippet or ""),
                                     "score": d.score,
                                 }
                             )
+                            if len(docs) >= MAX_DOCS_PER_TOOL:
+                                break
                         content = json.dumps({"documents": docs})
 
                     if total_events >= MAX_TOOL_EVENTS:
