@@ -161,10 +161,21 @@ def _tool_messages(outputs: List[Any]) -> List[Dict[str, Any]]:
     return msgs
 
 
-async def _run_agent(prompt: str) -> Dict[str, Any]:
+async def _run_agent(prompt: str, step_callback=None) -> Dict[str, Any]:
+    """
+    Run the agent. If step_callback is provided, it will be called after each generation
+    step with (generated_text, tool_outputs) so callers can stream intermediate events.
+    """
     wf = get_workflow()
-    result = await wf(problem=prompt, dataset_name=None, verbose=False)
-    tool_outputs = result.get("full_traces", {}).tool_calls if hasattr(result.get("full_traces", {}), "tool_calls") else []
+    if step_callback:
+        result = await wf(problem=prompt, dataset_name=None, verbose=False, step_callback=step_callback)
+    else:
+        result = await wf(problem=prompt, dataset_name=None, verbose=False)
+    tool_outputs = (
+        result.get("full_traces", {}).tool_calls
+        if hasattr(result.get("full_traces", {}), "tool_calls")
+        else []
+    )
     tool_calls = _tool_calls_from_outputs(tool_outputs or [])
     tool_msgs = _tool_messages(tool_outputs or [])
     final_text = result.get("generated_text", "")
@@ -224,15 +235,19 @@ async def chat_completions(request: Request):
         )
     messages = body.get("messages", [])
     user_msg = ""
-    # Take the last user message as the problem
-    for m in reversed(messages):
-        if m.get("role") == "user":
-            content = m.get("content")
+    # Build a simple context string from all messages to retain history.
+    # This is a pragmatic stop-gap until full conversation handling is added in the agent.
+    if messages:
+        parts = []
+        for m in messages:
+            role = m.get("role", "user")
+            content = m.get("content", "")
             if isinstance(content, list):
-                user_msg = " ".join(str(p.get("text", "")) if isinstance(p, dict) else str(p) for p in content)
+                text = " ".join(str(p.get("text", "")) if isinstance(p, dict) else str(p) for p in content)
             else:
-                user_msg = str(content)
-            break
+                text = str(content)
+            parts.append(f"{role}: {text}")
+        user_msg = "\n".join(parts)
 
     # If Gemini requested, call directly (no tools)
     if model.startswith("gemini"):
@@ -256,54 +271,140 @@ async def chat_completions(request: Request):
 
         return StreamingResponse(gemini_stream(), media_type="text/event-stream")
 
-    try:
-        result = await _run_agent(user_msg)
-    except Exception as e:  # noqa: BLE001
-        err_chunk = {"error": {"message": str(e), "type": type(e).__name__}}
+    # Streaming via step_callback to surface tool calls/results progressively
+    event_queue: asyncio.Queue = asyncio.Queue()
+    tool_idx = 0
 
-        async def err_stream():
-            yield f"data: {json.dumps(err_chunk)}\n\n".encode()
-            yield b"data: [DONE]\n\n"
+    async def step_cb(generated_text: str, tool_outputs: List[Any]):
+        nonlocal tool_idx
+        if generated_text:
+            await event_queue.put(("text", generated_text))
+        for t in tool_outputs or []:
+            call_id = f"call_{tool_idx}"
+            tool_idx += 1
+            await event_queue.put(("tool", call_id, t))
 
-        return StreamingResponse(err_stream(), media_type="text/event-stream")
-
-    tool_calls = result["tool_calls"]
-    tool_msgs = result["tool_messages"]
-    final_text = result["text"] or ""
+    run_task = asyncio.create_task(_run_agent(user_msg, step_callback=step_cb))
 
     async def stream():
-        chunk = {
-            "id": DR_TULU_MODEL,
-            "object": "chat.completion.chunk",
-            "model": DR_TULU_MODEL,
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {
-                        "role": "assistant",
-                        "content": final_text,
-                        "tool_calls": tool_calls,
-                    },
-                    "finish_reason": "stop",
-                }
-            ],
-        }
-        yield f"data: {json.dumps(chunk)}\n\n".encode()
-        for tm in tool_msgs:
-            msg = {
-                "id": "tool-msg",
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
+                except asyncio.TimeoutError:
+                    if run_task.done():
+                        break
+                    continue
+
+                if event[0] == "text":
+                    text = event[1]
+                    chunk = {
+                        "id": DR_TULU_MODEL,
+                        "object": "chat.completion.chunk",
+                        "model": DR_TULU_MODEL,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "role": "assistant",
+                                    "content": text,
+                                },
+                                "finish_reason": None,
+                            }
+                        ],
+                    }
+                    yield f"data: {json.dumps(chunk)}\n\n".encode()
+                elif event[0] == "tool":
+                    _, call_id, t = event
+                    # Emit an invocation chunk so UIs can show the call
+                    invoke_chunk = {
+                        "id": DR_TULU_MODEL,
+                        "object": "chat.completion.chunk",
+                        "model": DR_TULU_MODEL,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "role": "assistant",
+                                    "content": "",
+                                    "tool_calls": [
+                                        {
+                                            "id": call_id,
+                                            "type": "function",
+                                            "function": {
+                                                "name": getattr(t, "tool_name", getattr(t, "name", "tool")),
+                                                "arguments": "{}",
+                                            },
+                                        }
+                                    ],
+                                },
+                                "finish_reason": None,
+                            }
+                        ],
+                    }
+                    yield f"data: {json.dumps(invoke_chunk)}\n\n".encode()
+
+                    # Emit the tool result
+                    content = ""
+                    name = getattr(t, "tool_name", getattr(t, "name", "tool"))
+                    if isinstance(t, ToolOutput):
+                        content = t.output or ""
+                    elif isinstance(t, DocumentToolOutput):
+                        docs = []
+                        for d in t.documents or []:
+                            docs.append(
+                                {
+                                    "title": d.title,
+                                    "url": d.url,
+                                    "snippet": d.snippet,
+                                    "score": d.score,
+                                }
+                            )
+                        content = json.dumps({"documents": docs})
+
+                    tool_msg = {
+                        "id": "tool-msg",
+                        "object": "chat.completion.chunk",
+                        "model": DR_TULU_MODEL,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "role": "tool",
+                                    "tool_call_id": call_id,
+                                    "name": name,
+                                    "content": content,
+                                },
+                                "finish_reason": None,
+                            }
+                        ],
+                    }
+                    yield f"data: {json.dumps(tool_msg)}\n\n".encode()
+        finally:
+            # Await final result to surface any errors
+            try:
+                result = await run_task
+            except Exception as e:  # noqa: BLE001
+                err_chunk = {"error": {"message": str(e), "type": type(e).__name__}}
+                yield f"data: {json.dumps(err_chunk)}\n\n".encode()
+                yield b"data: [DONE]\n\n"
+                return
+
+            # Send a final stop chunk (no additional content to avoid duplication)
+            final_chunk = {
+                "id": DR_TULU_MODEL,
                 "object": "chat.completion.chunk",
                 "model": DR_TULU_MODEL,
                 "choices": [
                     {
                         "index": 0,
-                        "delta": tm,
+                        "delta": {},
                         "finish_reason": "stop",
                     }
                 ],
             }
-            yield f"data: {json.dumps(msg)}\n\n".encode()
-        yield b"data: [DONE]\n\n"
+            yield f"data: {json.dumps(final_chunk)}\n\n".encode()
+            yield b"data: [DONE]\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
 
