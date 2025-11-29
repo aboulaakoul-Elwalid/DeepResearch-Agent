@@ -49,6 +49,7 @@ AVAILABLE_MODELS = [DR_TULU_MODEL, GEMINI_MODEL]
 CONFIG_PATH = DR_TULU_AGENT / "workflows" / "auto_search_deep.yaml"
 GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_AI_API_KEY")
 GEMINI_API_BASE = os.getenv("GOOGLE_API_BASE", "https://generativelanguage.googleapis.com")
+MAX_TOOL_EVENTS = int(os.getenv("DR_TULU_MAX_TOOL_EVENTS", "40"))
 
 app = FastAPI(title="DR-Tulu Agent Gateway", version="0.1.0")
 app.add_middleware(
@@ -248,12 +249,29 @@ async def chat_completions(request: Request):
                 text = str(content)
             parts.append(f"{role}: {text}")
         history = "\n".join(parts)
+
+        # Intent hint: if the latest user message mentions video(s), steer to finding links, not tutorials.
+        last_user_text = ""
+        for m in reversed(messages):
+            if m.get("role") == "user":
+                c = m.get("content", "")
+                if isinstance(c, list):
+                    last_user_text = " ".join(str(p.get("text", "")) if isinstance(p, dict) else str(p) for p in c)
+                else:
+                    last_user_text = str(c)
+                break
+        video_hint = ""
+        if "video" in last_user_text.lower():
+            video_hint = "- If the user wants videos, find video links (e.g., site:youtube.com) instead of tutorials about searching.\n"
+
         guardrails = (
             "Guidelines:\n"
             "- Do not fixate on a single inaccessible source (e.g., PDF first page). If one source fails, pivot.\n"
             "- Reuse and synthesize information already gathered before claiming it's missing.\n"
-            "- Avoid repeating the exact same query or URL.\n"
+            "- Avoid repeating the exact same query or URL; prefer direct links from aggregators when available.\n"
             "- Prefer summarizing multiple items over saying the overview is limited.\n"
+            "- When on landing pages (news/list), click into 1-2 items for depth.\n"
+            f"{video_hint}"
         )
         user_msg = guardrails + "\n\nConversation:\n" + history
 
@@ -283,6 +301,7 @@ async def chat_completions(request: Request):
     event_queue: asyncio.Queue = asyncio.Queue()
     seen_urls: set[str] = set()
     tool_idx = 0
+    total_events = 0
 
     async def step_cb(generated_text: str, tool_outputs: List[Any]):
         nonlocal tool_idx
@@ -313,6 +332,9 @@ async def chat_completions(request: Request):
 
                 if event[0] == "text":
                     text = event[1]
+                    if total_events >= MAX_TOOL_EVENTS:
+                        break
+                    total_events += 1
                     chunk = {
                         "id": DR_TULU_MODEL,
                         "object": "chat.completion.chunk",
@@ -332,6 +354,9 @@ async def chat_completions(request: Request):
                 elif event[0] == "tool":
                     _, call_id, t = event
                     # Emit an invocation chunk so UIs can show the call
+                    if total_events >= MAX_TOOL_EVENTS:
+                        break
+                    total_events += 1
                     invoke_chunk = {
                         "id": DR_TULU_MODEL,
                         "object": "chat.completion.chunk",
@@ -377,6 +402,9 @@ async def chat_completions(request: Request):
                             )
                         content = json.dumps({"documents": docs})
 
+                    if total_events >= MAX_TOOL_EVENTS:
+                        break
+                    total_events += 1
                     tool_msg = {
                         "id": "tool-msg",
                         "object": "chat.completion.chunk",
@@ -396,30 +424,33 @@ async def chat_completions(request: Request):
                     }
                     yield f"data: {json.dumps(tool_msg)}\n\n".encode()
         finally:
-            # Await final result to surface any errors
-            try:
-                result = await run_task
-            except Exception as e:  # noqa: BLE001
-                err_chunk = {"error": {"message": str(e), "type": type(e).__name__}}
-                yield f"data: {json.dumps(err_chunk)}\n\n".encode()
-                yield b"data: [DONE]\n\n"
-                return
-
-            # Send a final stop chunk (no additional content to avoid duplication)
-            final_chunk = {
-                "id": DR_TULU_MODEL,
-                "object": "chat.completion.chunk",
-                "model": DR_TULU_MODEL,
-                "choices": [
-                    {
-                        "index": 0,
-                        "delta": {},
-                        "finish_reason": "stop",
-                    }
-                ],
-            }
-            yield f"data: {json.dumps(final_chunk)}\n\n".encode()
+            # If we hit the cap, try to cancel the task to reduce wasted work
+            if total_events >= MAX_TOOL_EVENTS and not run_task.done():
+                run_task.cancel()
+        # Await final result to surface any errors
+        try:
+            result = await run_task
+        except Exception as e:  # noqa: BLE001
+            err_chunk = {"error": {"message": str(e), "type": type(e).__name__}}
+            yield f"data: {json.dumps(err_chunk)}\n\n".encode()
             yield b"data: [DONE]\n\n"
+            return
+
+        # Send a final stop chunk (no additional content to avoid duplication)
+        final_chunk = {
+            "id": DR_TULU_MODEL,
+            "object": "chat.completion.chunk",
+            "model": DR_TULU_MODEL,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop",
+                }
+            ],
+        }
+        yield f"data: {json.dumps(final_chunk)}\n\n".encode()
+        yield b"data: [DONE]\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
 
