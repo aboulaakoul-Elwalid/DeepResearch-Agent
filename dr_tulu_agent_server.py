@@ -183,6 +183,27 @@ async def _run_agent(prompt: str, step_callback=None) -> Dict[str, Any]:
     return {"text": final_text, "tool_calls": tool_calls, "tool_messages": tool_msgs}
 
 
+_STRIP_PATTERNS = [
+    (r"<think>.*?</think>", ""),  # reasoning blocks
+    (r"<call_tool[^>]*>.*?</call_tool>", ""),  # tool directives in text
+    (r"<answer>", ""),  # answer wrappers
+    (r"</answer>", ""),
+    (r"<raw_trace>.*?</raw_trace>", ""),
+]
+
+
+def _clean_text(s: str) -> str:
+    import re
+
+    cleaned = s or ""
+    for pat, repl in _STRIP_PATTERNS:
+        cleaned = re.sub(pat, repl, cleaned, flags=re.DOTALL | re.IGNORECASE)
+    # Collapse whitespace
+    cleaned = re.sub(r"\s+\n", "\n", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
 @app.get("/model/list")
 async def model_list():
     return {"type": "model_list", "data": [{"name": m, "vram_gb": 0} for m in AVAILABLE_MODELS]}
@@ -305,8 +326,7 @@ async def chat_completions(request: Request):
 
     async def step_cb(generated_text: str, tool_outputs: List[Any]):
         nonlocal tool_idx
-        if generated_text:
-            await event_queue.put(("text", generated_text))
+        # We no longer stream raw model text here to avoid leaking internal tags.
         for t in tool_outputs or []:
             call_id = f"call_{tool_idx}"
             tool_idx += 1
@@ -322,6 +342,7 @@ async def chat_completions(request: Request):
 
     async def stream():
         nonlocal total_events
+        final_text: str | None = None
         try:
             while True:
                 try:
@@ -332,26 +353,8 @@ async def chat_completions(request: Request):
                     continue
 
                 if event[0] == "text":
-                    text = event[1]
-                    if total_events >= MAX_TOOL_EVENTS:
-                        break
-                    total_events += 1
-                    chunk = {
-                        "id": DR_TULU_MODEL,
-                        "object": "chat.completion.chunk",
-                        "model": DR_TULU_MODEL,
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {
-                                    "role": "assistant",
-                                    "content": text,
-                                },
-                                "finish_reason": None,
-                            }
-                        ],
-                    }
-                    yield f"data: {json.dumps(chunk)}\n\n".encode()
+                    # We suppressed streaming raw text; ignore.
+                    continue
                 elif event[0] == "tool":
                     _, call_id, t = event
                     # Emit an invocation chunk so UIs can show the call
@@ -437,20 +440,24 @@ async def chat_completions(request: Request):
             yield b"data: [DONE]\n\n"
             return
 
-        # Send a final stop chunk (no additional content to avoid duplication)
-        final_chunk = {
+        final_text = _clean_text(result.get("text") or "")
+        # Send final answer chunk (no tool_calls here; tools already streamed)
+        chunk = {
             "id": DR_TULU_MODEL,
             "object": "chat.completion.chunk",
             "model": DR_TULU_MODEL,
             "choices": [
                 {
                     "index": 0,
-                    "delta": {},
+                    "delta": {
+                        "role": "assistant",
+                        "content": final_text,
+                    },
                     "finish_reason": "stop",
                 }
             ],
         }
-        yield f"data: {json.dumps(final_chunk)}\n\n".encode()
+        yield f"data: {json.dumps(chunk)}\n\n".encode()
         yield b"data: [DONE]\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
