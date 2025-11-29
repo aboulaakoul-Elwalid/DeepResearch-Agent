@@ -235,7 +235,7 @@ async def chat_completions(request: Request):
         )
     messages = body.get("messages", [])
     user_msg = ""
-    # Build a simple context string from all messages to retain history.
+    # Build a simple context string from all messages to retain history and nudge behavior.
     # This is a pragmatic stop-gap until full conversation handling is added in the agent.
     if messages:
         parts = []
@@ -247,7 +247,15 @@ async def chat_completions(request: Request):
             else:
                 text = str(content)
             parts.append(f"{role}: {text}")
-        user_msg = "\n".join(parts)
+        history = "\n".join(parts)
+        guardrails = (
+            "Guidelines:\n"
+            "- Do not fixate on a single inaccessible source (e.g., PDF first page). If one source fails, pivot.\n"
+            "- Reuse and synthesize information already gathered before claiming it's missing.\n"
+            "- Avoid repeating the exact same query or URL.\n"
+            "- Prefer summarizing multiple items over saying the overview is limited.\n"
+        )
+        user_msg = guardrails + "\n\nConversation:\n" + history
 
     # If Gemini requested, call directly (no tools)
     if model.startswith("gemini"):
