@@ -428,6 +428,8 @@ async def chat_completions(request: Request):
     async def step_cb(generated_text: str, tool_outputs: List[Any]):
         nonlocal tool_idx
         # We no longer stream raw model text here to avoid leaking internal tags.
+        # Note: The workflow doesn't currently emit tool outputs through this callback,
+        # so we handle them in post-processing after the run completes (see below).
         for t in tool_outputs or []:
             call_id = f"call_{tool_idx}"
             tool_idx += 1
@@ -551,6 +553,12 @@ async def chat_completions(request: Request):
             yield f"data: {json.dumps(err_chunk)}\n\n".encode()
             yield b"data: [DONE]\n\n"
             return
+
+        # NOTE: The workflow doesn't emit tools through the callback progressively.
+        # Tools ARE being executed internally, but we only get them in the final result.
+        # For now, we include them in the final_text (which contains the full trace with tool calls).
+        # A future improvement would be to parse and emit these as proper OpenAI tool_calls messages,
+        # but Open WebUI's chat UI doesn't render tool_calls well in streaming context.
 
         final_text = _clean_text(result.get("text") or "")
         # Send final answer chunk (no tool_calls here; tools already streamed)
