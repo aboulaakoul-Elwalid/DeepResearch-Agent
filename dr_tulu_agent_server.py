@@ -52,14 +52,15 @@ UPSTREAM_API_BASE = os.getenv(
 )
 UPSTREAM_API_KEY = os.getenv("UPSTREAM_API_KEY", "dummy")
 AVAILABLE_MODELS = [DR_TULU_MODEL, QWEN_MODEL, GEMINI_MODEL]
+STREAM_TOOL_RESULTS = os.getenv("DR_TULU_STREAM_TOOL_RESULTS", "false").lower() == "true"
 CONFIG_PATH = DR_TULU_AGENT / "workflows" / "auto_search_deep.yaml"
 GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_AI_API_KEY")
 GEMINI_API_BASE = os.getenv("GOOGLE_API_BASE", "https://generativelanguage.googleapis.com")
 MAX_TOOL_EVENTS = int(os.getenv("DR_TULU_MAX_TOOL_EVENTS", "25"))
-# Maximum docs per tool result to forward
-MAX_DOCS_PER_TOOL = int(os.getenv("DR_TULU_MAX_DOCS_PER_TOOL", "5"))
-# Maximum characters per text/snippet to forward
-MAX_CONTENT_CHARS = int(os.getenv("DR_TULU_MAX_CONTENT_CHARS", "1200"))
+# Maximum docs per tool result to forward (smaller = less UI noise)
+MAX_DOCS_PER_TOOL = int(os.getenv("DR_TULU_MAX_DOCS_PER_TOOL", "3"))
+# Maximum characters per text/snippet to forward (smaller = less UI noise)
+MAX_CONTENT_CHARS = int(os.getenv("DR_TULU_MAX_CONTENT_CHARS", "400"))
 
 app = FastAPI(title="DR-Tulu Agent Gateway", version="0.1.0")
 app.add_middleware(
@@ -311,7 +312,13 @@ async def cluster_status():
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse(
+            {"error": {"message": f"invalid JSON: {e}", "type": "invalid_request"}},
+            status_code=400,
+        )
     model = body.get("model") or DR_TULU_MODEL
     if not model:
         return JSONResponse(
@@ -416,6 +423,7 @@ async def chat_completions(request: Request):
     seen_urls: set[str] = set()
     tool_idx = 0
     total_events = 0
+    tool_calls_count = 0
 
     async def step_cb(generated_text: str, tool_outputs: List[Any]):
         nonlocal tool_idx
@@ -454,6 +462,7 @@ async def chat_completions(request: Request):
                     if total_events >= MAX_TOOL_EVENTS:
                         break
                     total_events += 1
+                    tool_calls_count += 1
                     invoke_chunk = {
                         "id": DR_TULU_MODEL,
                         "object": "chat.completion.chunk",
@@ -464,14 +473,15 @@ async def chat_completions(request: Request):
                                 "delta": {
                                     "role": "assistant",
                                     "content": "",
-                                        "tool_calls": [
-                                            {
-                                                "id": call_id,
-                                                "type": "function",
-                                                "function": {
-                                                    "name": getattr(t, "tool_name", getattr(t, "name", "tool")),
-                                                    "arguments": json.dumps(_tool_call_args(t) or {}),
-                                                },
+                                    "tool_calls": [
+                                        {
+                                            "id": call_id,
+                                            "index": 0,
+                                            "type": "function",
+                                            "function": {
+                                                "name": getattr(t, "tool_name", getattr(t, "name", "tool")),
+                                                "arguments": json.dumps(_tool_call_args(t) or {}),
+                                            },
                                             }
                                         ],
                                     },
@@ -506,27 +516,29 @@ async def chat_completions(request: Request):
                                 break
                         content = json.dumps({"documents": docs})
 
-                    if total_events >= MAX_TOOL_EVENTS:
-                        break
-                    total_events += 1
-                    tool_msg = {
-                        "id": "tool-msg",
-                        "object": "chat.completion.chunk",
-                        "model": DR_TULU_MODEL,
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {
-                                    "role": "tool",
-                                    "tool_call_id": call_id,
-                                    "name": name,
-                                    "content": content,
-                                },
-                                "finish_reason": None,
-                            }
-                        ],
-                    }
-                    yield f"data: {json.dumps(tool_msg)}\n\n".encode()
+                    # Only stream tool results to clients if explicitly enabled.
+                    if STREAM_TOOL_RESULTS:
+                        if total_events >= MAX_TOOL_EVENTS:
+                            break
+                        total_events += 1
+                        tool_msg = {
+                            "id": "tool-msg",
+                            "object": "chat.completion.chunk",
+                            "model": DR_TULU_MODEL,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "delta": {
+                                        "role": "tool",
+                                        "tool_call_id": call_id,
+                                        "name": name,
+                                        "content": content,
+                                    },
+                                    "finish_reason": None,
+                                }
+                            ],
+                        }
+                        yield f"data: {json.dumps(tool_msg)}\n\n".encode()
         finally:
             # If we hit the cap, try to cancel the task to reduce wasted work
             if total_events >= MAX_TOOL_EVENTS and not run_task.done():
