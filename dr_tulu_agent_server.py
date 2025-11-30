@@ -13,8 +13,8 @@ Endpoints (Parallax/Zola-compatible surface):
 
 Run:
     cd /home/elwalid/projects/parallax_project
-    source DR-Tulu/agent/activate.sh
-    uvicorn dr_tulu_agent_server:app --host 0.0.0.0 --port 3001
+    source .venv/bin/activate
+    python dr_tulu_agent_server.py
 
 Notes:
 - Uses DR-Tulu/agent/workflows/auto_search_deep.yaml (long_form, browse on, tool_calls=20).
@@ -25,20 +25,40 @@ Notes:
 
 import asyncio
 import json
+import logging
 import os
 import sys
+import time
+import traceback
 import requests
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(), logging.FileHandler("/tmp/dr_tulu_gateway.log")],
+)
+logger = logging.getLogger(__name__)
 
 # Add DR-Tulu agent to path
 ROOT = Path(__file__).resolve().parent
 DR_TULU_AGENT = ROOT / "DR-Tulu" / "agent"
 sys.path.insert(0, str(DR_TULU_AGENT))
+
+# Load .env from DR-Tulu/agent directory BEFORE importing dr_agent modules
+env_path = DR_TULU_AGENT / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
+    logger.info(f"Loaded environment from {env_path}")
+else:
+    logger.warning(f".env not found at {env_path}")
 
 from workflows.auto_search_sft import AutoReasonSearchWorkflow  # type: ignore
 from dr_agent.tool_interface.data_types import DocumentToolOutput, ToolOutput  # type: ignore
@@ -52,15 +72,19 @@ UPSTREAM_API_BASE = os.getenv(
 )
 UPSTREAM_API_KEY = os.getenv("UPSTREAM_API_KEY", "dummy")
 AVAILABLE_MODELS = [DR_TULU_MODEL, QWEN_MODEL, GEMINI_MODEL]
-STREAM_TOOL_RESULTS = os.getenv("DR_TULU_STREAM_TOOL_RESULTS", "false").lower() == "true"
+STREAM_TOOL_RESULTS = (
+    os.getenv("DR_TULU_STREAM_TOOL_RESULTS", "false").lower() == "true"
+)
 CONFIG_PATH = DR_TULU_AGENT / "workflows" / "auto_search_deep.yaml"
 GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_AI_API_KEY")
-GEMINI_API_BASE = os.getenv("GOOGLE_API_BASE", "https://generativelanguage.googleapis.com")
+GEMINI_API_BASE = os.getenv(
+    "GOOGLE_API_BASE", "https://generativelanguage.googleapis.com"
+)
 MAX_TOOL_EVENTS = int(os.getenv("DR_TULU_MAX_TOOL_EVENTS", "25"))
 # Maximum docs per tool result to forward (smaller = less UI noise)
 MAX_DOCS_PER_TOOL = int(os.getenv("DR_TULU_MAX_DOCS_PER_TOOL", "3"))
 # Maximum characters per text/snippet to forward (smaller = less UI noise)
-MAX_CONTENT_CHARS = int(os.getenv("DR_TULU_MAX_CONTENT_CHARS", "400"))
+MAX_CONTENT_CHARS = int(os.getenv("DR_TULU_MAX_CONTENT_CHARS", "4000"))
 
 app = FastAPI(title="DR-Tulu Agent Gateway", version="0.1.0")
 app.add_middleware(
@@ -105,7 +129,10 @@ def _call_gemini_direct(model: str, messages: List[Dict[str, Any]]) -> str:
         role = m.get("role", "user")
         content = m.get("content", "")
         if isinstance(content, list):
-            text = " ".join(str(p.get("text", "")) if isinstance(p, dict) else str(p) for p in content)
+            text = " ".join(
+                str(p.get("text", "")) if isinstance(p, dict) else str(p)
+                for p in content
+            )
         else:
             text = str(content)
         prompt_parts.append(f"{role}: {text}")
@@ -123,10 +150,15 @@ def _call_gemini_direct(model: str, messages: List[Dict[str, Any]]) -> str:
             candidates = data.get("candidates") or []
             if not candidates:
                 return ""
-            return candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            return (
+                candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            )
         except Exception as e:  # noqa: BLE001
             last_error = e
-    if isinstance(last_error, requests.HTTPError) and getattr(last_error, "response", None) is not None:
+    if (
+        isinstance(last_error, requests.HTTPError)
+        and getattr(last_error, "response", None) is not None
+    ):
         return f"[gateway-error] {last_error.response.status_code}: {last_error.response.text}"
     return f"[gateway-error] {last_error}"
 
@@ -213,7 +245,14 @@ def _tool_messages(outputs: List[Any]) -> List[Dict[str, Any]]:
                 if len(docs) >= MAX_DOCS_PER_TOOL:
                     break
             content = json.dumps({"documents": docs})
-        msgs.append({"role": "tool", "tool_call_id": f"call_{idx}", "name": name, "content": content})
+        msgs.append(
+            {
+                "role": "tool",
+                "tool_call_id": f"call_{idx}",
+                "name": name,
+                "content": content,
+            }
+        )
     return msgs
 
 
@@ -224,7 +263,12 @@ async def _run_agent(prompt: str, step_callback=None) -> Dict[str, Any]:
     """
     wf = get_workflow()
     if step_callback:
-        result = await wf(problem=prompt, dataset_name=None, verbose=False, step_callback=step_callback)
+        result = await wf(
+            problem=prompt,
+            dataset_name=None,
+            verbose=False,
+            step_callback=step_callback,
+        )
     else:
         result = await wf(problem=prompt, dataset_name=None, verbose=False)
     tool_outputs = (
@@ -240,11 +284,19 @@ async def _run_agent(prompt: str, step_callback=None) -> Dict[str, Any]:
 
 _STRIP_PATTERNS = [
     (r"<think>.*?</think>", ""),  # reasoning blocks
-    (r"<call_tool[^>]*>.*?</call_tool>", ""),  # tool directives in text
+    (
+        r"<call_tool[^>]*>.*?</call_tool>",
+        "",
+    ),  # tool directives in text (v20250824 format)
+    (r"<tool_call>.*?</tool_call>", ""),  # Qwen tool call format
+    (r"<tool_response>.*?</tool_response>", ""),  # Qwen tool response format
+    (r"</?tool_call>", ""),  # orphan tool_call tags
+    (r"</?tool_response>", ""),  # orphan tool_response tags
     (r"<answer>", ""),  # answer wrappers
     (r"</answer>", ""),
     (r"<tool_output[^>]*>.*?</tool_output>", ""),
     (r"<webpage[^>]*>.*?</webpage>", ""),
+    (r"<snippet[^>]*>.*?</snippet>", ""),  # search snippets
     (r"<raw_trace>.*?</raw_trace>", ""),
     (r"!\[Image [0-9]+\]", ""),
     (r"\[!\[Image[^\]]*\]\([^\)]*\)\]", ""),
@@ -269,12 +321,18 @@ def _clean_text(s: str) -> str:
 
 @app.get("/model/list")
 async def model_list():
-    return {"type": "model_list", "data": [{"name": m, "vram_gb": 0} for m in AVAILABLE_MODELS]}
+    return {
+        "type": "model_list",
+        "data": [{"name": m, "vram_gb": 0} for m in AVAILABLE_MODELS],
+    }
 
 
 @app.get("/v1/models")
 async def v1_models():
-    return {"data": [{"id": m, "object": "model"} for m in AVAILABLE_MODELS], "object": "list"}
+    return {
+        "data": [{"id": m, "object": "model"} for m in AVAILABLE_MODELS],
+        "object": "list",
+    }
 
 
 @app.post("/scheduler/init")
@@ -322,7 +380,8 @@ async def chat_completions(request: Request):
     model = body.get("model") or DR_TULU_MODEL
     if not model:
         return JSONResponse(
-            {"error": {"message": "model is required", "type": "invalid_request"}}, status_code=400
+            {"error": {"message": "model is required", "type": "invalid_request"}},
+            status_code=400,
         )
     messages = body.get("messages", [])
     user_msg = ""
@@ -334,7 +393,10 @@ async def chat_completions(request: Request):
             role = m.get("role", "user")
             content = m.get("content", "")
             if isinstance(content, list):
-                text = " ".join(str(p.get("text", "")) if isinstance(p, dict) else str(p) for p in content)
+                text = " ".join(
+                    str(p.get("text", "")) if isinstance(p, dict) else str(p)
+                    for p in content
+                )
             else:
                 text = str(content)
             parts.append(f"{role}: {text}")
@@ -346,7 +408,10 @@ async def chat_completions(request: Request):
             if m.get("role") == "user":
                 c = m.get("content", "")
                 if isinstance(c, list):
-                    last_user_text = " ".join(str(p.get("text", "")) if isinstance(p, dict) else str(p) for p in c)
+                    last_user_text = " ".join(
+                        str(p.get("text", "")) if isinstance(p, dict) else str(p)
+                        for p in c
+                    )
                 else:
                     last_user_text = str(c)
                 break
@@ -411,7 +476,13 @@ async def chat_completions(request: Request):
                         "id": "gemini-fallback",
                         "object": "chat.completion.chunk",
                         "model": GEMINI_MODEL,
-                        "choices": [{"index": 0, "delta": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"role": "assistant", "content": text},
+                                "finish_reason": "stop",
+                            }
+                        ],
                     }
                     yield f"data: {json.dumps(chunk)}\n\n".encode()
                 yield b"data: [DONE]\n\n"
@@ -441,13 +512,47 @@ async def chat_completions(request: Request):
                 seen_urls.add(url)
             await event_queue.put(("tool", call_id, t))
 
-    run_task = asyncio.create_task(_run_agent(user_msg, step_callback=step_cb))
+    # Set a timeout for the entire workflow execution (prevent infinite hangs)
+    workflow_timeout = int(
+        os.getenv("DR_TULU_WORKFLOW_TIMEOUT", "120")
+    )  # 2 minutes default
+
+    async def run_agent_with_timeout():
+        try:
+            result = await asyncio.wait_for(
+                _run_agent(user_msg, step_callback=step_cb), timeout=workflow_timeout
+            )
+            return result
+        except asyncio.TimeoutError:
+            print(f"[ERROR] DR-Tulu workflow timed out after {workflow_timeout}s")
+            return {
+                "text": f"[Error] Research workflow timed out after {workflow_timeout} seconds. Please try a simpler query.",
+                "tool_calls": [],
+                "tool_messages": [],
+            }
+        except Exception as e:
+            print(f"[ERROR] DR-Tulu workflow error: {e}")
+            return {"text": f"[Error] {str(e)}", "tool_calls": [], "tool_messages": []}
+
+    run_task = asyncio.create_task(run_agent_with_timeout())
 
     async def stream():
-        nonlocal total_events
+        nonlocal total_events, tool_calls_count
         final_text: str | None = None
+        # Track total streaming time to prevent client hangs
+        stream_start_time = asyncio.get_event_loop().time()
+        max_stream_duration = (
+            workflow_timeout + 30
+        )  # Give stream a bit more time than workflow
+
         try:
             while True:
+                # Check if we've been streaming too long
+                elapsed = asyncio.get_event_loop().time() - stream_start_time
+                if elapsed > max_stream_duration:
+                    print(f"[WARN] Stream timeout after {elapsed:.1f}s, breaking")
+                    break
+
                 try:
                     event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
                 except asyncio.TimeoutError:
@@ -481,13 +586,19 @@ async def chat_completions(request: Request):
                                             "index": 0,
                                             "type": "function",
                                             "function": {
-                                                "name": getattr(t, "tool_name", getattr(t, "name", "tool")),
-                                                "arguments": json.dumps(_tool_call_args(t) or {}),
+                                                "name": getattr(
+                                                    t,
+                                                    "tool_name",
+                                                    getattr(t, "name", "tool"),
+                                                ),
+                                                "arguments": json.dumps(
+                                                    _tool_call_args(t) or {}
+                                                ),
                                             },
-                                            }
-                                        ],
-                                    },
-                                    "finish_reason": None,
+                                        }
+                                    ],
+                                },
+                                "finish_reason": None,
                             }
                         ],
                     }
