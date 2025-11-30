@@ -45,7 +45,13 @@ from dr_agent.tool_interface.data_types import DocumentToolOutput, ToolOutput  #
 
 DR_TULU_MODEL = "dr-tulu"
 GEMINI_MODEL = os.getenv("GEMINI_MODEL_ID", "gemini/gemini-2.5-flash")
-AVAILABLE_MODELS = [DR_TULU_MODEL, GEMINI_MODEL]
+QWEN_MODEL = os.getenv("QWEN_MODEL_ID", "Qwen/Qwen2.5-0.5B-Instruct")
+UPSTREAM_API_BASE = os.getenv(
+    "UPSTREAM_API_BASE",
+    "https://aboulaakoul-elwalid--deep-scholar-parallax-run-parallax.modal.run/v1",
+)
+UPSTREAM_API_KEY = os.getenv("UPSTREAM_API_KEY", "dummy")
+AVAILABLE_MODELS = [DR_TULU_MODEL, QWEN_MODEL, GEMINI_MODEL]
 CONFIG_PATH = DR_TULU_AGENT / "workflows" / "auto_search_deep.yaml"
 GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_AI_API_KEY")
 GEMINI_API_BASE = os.getenv("GOOGLE_API_BASE", "https://generativelanguage.googleapis.com")
@@ -124,20 +130,57 @@ def _call_gemini_direct(model: str, messages: List[Dict[str, Any]]) -> str:
     return f"[gateway-error] {last_error}"
 
 
+async def _proxy_openai_stream(payload: Dict[str, Any]) -> AsyncGenerator[bytes, None]:
+    """
+    Proxy to an upstream OpenAI-compatible endpoint (e.g., Modal Qwen). Streams SSE.
+    """
+    import httpx
+
+    headers = {
+        "Content-Type": "application/json",
+    }
+    if UPSTREAM_API_KEY:
+        headers["Authorization"] = f"Bearer {UPSTREAM_API_KEY}"
+
+    url = f"{UPSTREAM_API_BASE}/chat/completions"
+    async with httpx.AsyncClient(timeout=60) as client:
+        async with client.stream("POST", url, json=payload, headers=headers) as resp:
+            async for line in resp.aiter_lines():
+                if not line:
+                    continue
+                # Ensure lines are prefixed with data:
+                if line.startswith("data:"):
+                    yield (line + "\n\n").encode()
+            yield b"data: [DONE]\n\n"
+
+
+def _tool_call_args(t: Any) -> Dict[str, Any]:
+    """
+    Best-effort capture of the input a tool was called with so UIs can display it.
+    """
+    arg_fields = ["query", "prompt", "input", "raw_input", "url", "source_url"]
+    args: Dict[str, Any] = {}
+    for field in arg_fields:
+        val = getattr(t, field, None)
+        if val:
+            args[field] = val
+    if isinstance(t, DocumentToolOutput):
+        urls = [d.url for d in (t.documents or []) if getattr(d, "url", None)]
+        if urls:
+            args["urls"] = urls[:MAX_DOCS_PER_TOOL]
+    return args
+
+
 def _tool_calls_from_outputs(outputs: List[Any]) -> List[Dict[str, Any]]:
     tool_calls: List[Dict[str, Any]] = []
     for idx, t in enumerate(outputs):
         name = getattr(t, "tool_name", getattr(t, "name", f"tool-{idx}"))
-        args = {}
-        if isinstance(t, ToolOutput):
-            args = {"output": t.output}
-        elif isinstance(t, DocumentToolOutput):
-            args = {"documents": [d.model_dump() for d in t.documents]}
+        args = _tool_call_args(t)
         tool_calls.append(
             {
                 "id": f"call_{idx}",
                 "type": "function",
-                "function": {"name": name, "arguments": json.dumps(args)},
+                "function": {"name": name, "arguments": json.dumps(args or {})},
             }
         )
     return tool_calls
@@ -199,6 +242,8 @@ _STRIP_PATTERNS = [
     (r"<call_tool[^>]*>.*?</call_tool>", ""),  # tool directives in text
     (r"<answer>", ""),  # answer wrappers
     (r"</answer>", ""),
+    (r"<tool_output[^>]*>.*?</tool_output>", ""),
+    (r"<webpage[^>]*>.*?</webpage>", ""),
     (r"<raw_trace>.*?</raw_trace>", ""),
     (r"!\[Image [0-9]+\]", ""),
     (r"\[!\[Image[^\]]*\]\([^\)]*\)\]", ""),
@@ -335,6 +380,37 @@ async def chat_completions(request: Request):
 
         return StreamingResponse(gemini_stream(), media_type="text/event-stream")
 
+    # Proxy to upstream (e.g., Modal Qwen) for non-dr-tulu/gemini models
+    if model != DR_TULU_MODEL:
+        proxy_payload = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "temperature": body.get("temperature", 0),
+            "max_tokens": body.get("max_tokens"),
+        }
+
+        async def upstream_stream():
+            try:
+                async for chunk in _proxy_openai_stream(proxy_payload):
+                    yield chunk
+            except Exception as e:  # noqa: BLE001
+                err = {"error": {"message": str(e), "type": type(e).__name__}}
+                yield f"data: {json.dumps(err)}\n\n".encode()
+                # Optional fallback to Gemini if configured
+                if GEMINI_API_KEY:
+                    text = _call_gemini_direct(GEMINI_MODEL, messages)
+                    chunk = {
+                        "id": "gemini-fallback",
+                        "object": "chat.completion.chunk",
+                        "model": GEMINI_MODEL,
+                        "choices": [{"index": 0, "delta": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
+                    }
+                    yield f"data: {json.dumps(chunk)}\n\n".encode()
+                yield b"data: [DONE]\n\n"
+
+        return StreamingResponse(upstream_stream(), media_type="text/event-stream")
+
     # Streaming via step_callback to surface tool calls/results progressively
     event_queue: asyncio.Queue = asyncio.Queue()
     seen_urls: set[str] = set()
@@ -388,18 +464,18 @@ async def chat_completions(request: Request):
                                 "delta": {
                                     "role": "assistant",
                                     "content": "",
-                                    "tool_calls": [
-                                        {
-                                            "id": call_id,
-                                            "type": "function",
-                                            "function": {
-                                                "name": getattr(t, "tool_name", getattr(t, "name", "tool")),
-                                                "arguments": "{}",
-                                            },
-                                        }
-                                    ],
-                                },
-                                "finish_reason": None,
+                                        "tool_calls": [
+                                            {
+                                                "id": call_id,
+                                                "type": "function",
+                                                "function": {
+                                                    "name": getattr(t, "tool_name", getattr(t, "name", "tool")),
+                                                    "arguments": json.dumps(_tool_call_args(t) or {}),
+                                                },
+                                            }
+                                        ],
+                                    },
+                                    "finish_reason": None,
                             }
                         ],
                     }
