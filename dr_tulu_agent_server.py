@@ -2,12 +2,15 @@
 """
 OpenAI-compatible HTTP gateway for DR-Tulu agent with Gemini backend.
 
-This gateway runs the DR-Tulu research agent and returns CLEAN responses
-that Open WebUI can render properly. No raw tool dumps in the output.
+This gateway runs the DR-Tulu research agent and returns responses
+with NATIVE Open WebUI citation support:
+- Inline citations as [1], [2,3] format
+- Structured sources array for clickable chips
+- Status updates for "thinking" panel during tool execution
 
 Endpoints:
 - GET /v1/models   (OpenAI shape)
-- POST /v1/chat/completions (streams SSE with clean final answer)
+- POST /v1/chat/completions (streams SSE with citations + sources)
 
 Run:
     cd /home/elwalid/projects/parallax_project
@@ -113,22 +116,22 @@ _STRIP_PATTERNS = [
 ]
 
 
-# Helper to convert number to letter sequence (0->A, 1->B, ..., 25->Z, 26->AA, ...)
-def _number_to_letters(n: int) -> str:
-    """Convert a number to letter sequence: 0->A, 1->B, ..., 25->Z, 26->AA, 27->AB, ..."""
-    result = ""
-    while n >= 0:
-        result = chr(65 + (n % 26)) + result  # 65 is 'A'
-        n = n // 26 - 1
-        if n < 0:
-            break
-    return result
+# Data class to hold processed content and sources for Open WebUI
+class ProcessedResponse:
+    """Holds cleaned content and structured sources for Open WebUI native citation support."""
+
+    def __init__(
+        self, content: str, sources: List[Dict[str, Any]], cited_urls: List[str]
+    ):
+        self.content = content
+        self.sources = sources  # Open WebUI format sources array
+        self.cited_urls = cited_urls  # URLs in order of citation
 
 
-def _extract_sources_from_raw(raw_text: str) -> dict:
+def _extract_sources_from_raw(raw_text: str) -> Dict[str, Dict[str, Any]]:
     """
     Extract snippet sources from raw workflow output.
-    Returns dict: {snippet_id: {"title": ..., "url": ...}}
+    Returns dict: {snippet_id: {"title": ..., "url": ..., "snippet": ...}}
     """
     sources = {}
 
@@ -138,14 +141,16 @@ def _extract_sources_from_raw(raw_text: str) -> dict:
         snippet_id = match.group(1)
         content = match.group(2)
 
-        # Extract title and URL from snippet content
+        # Extract title, URL, and snippet text from content
         title_match = re.search(r"Title:\s*(.+?)(?:\n|$)", content)
         url_match = re.search(r"URL:\s*(https?://[^\s\n]+)", content)
+        snippet_match = re.search(r"Snippet:\s*(.+?)(?:\n|$)", content, re.DOTALL)
 
         title = title_match.group(1).strip() if title_match else f"Source {snippet_id}"
         url = url_match.group(1).strip() if url_match else None
+        snippet_text = snippet_match.group(1).strip()[:500] if snippet_match else ""
 
-        sources[snippet_id] = {"title": title, "url": url}
+        sources[snippet_id] = {"title": title, "url": url, "snippet": snippet_text}
 
     # Pattern 2: <webpage id="...">...</webpage>
     webpage_pattern = r'<webpage\s+id=["\']?([^"\'>\s]+)["\']?[^>]*>(.*?)</webpage>'
@@ -157,39 +162,48 @@ def _extract_sources_from_raw(raw_text: str) -> dict:
         url_match = re.search(r"(https?://[^\s\n<]+)", content)
         url = url_match.group(1).strip() if url_match else None
 
-        # Use a portion of content as title
-        title = content[:50].strip().replace("\n", " ")
-        if len(content) > 50:
+        # Use a portion of content as title and snippet
+        title = content[:80].strip().replace("\n", " ")
+        if len(content) > 80:
             title += "..."
+        snippet_text = content[:500].strip()
 
-        sources[webpage_id] = {"title": title, "url": url}
+        sources[webpage_id] = {"title": title, "url": url, "snippet": snippet_text}
 
     return sources
 
 
-def _clean_text(s: str, include_sources: bool = True) -> str:
+def _process_response(raw_text: str) -> ProcessedResponse:
     """
-    Remove all internal markup and tool output from text, extract only the final answer.
-    Convert citations to markdown superscript links for Open WebUI.
-    """
-    if not s:
-        return ""
+    Process raw workflow output into Open WebUI native format.
 
-    # First, extract source information from the raw text BEFORE cleaning
-    sources = _extract_sources_from_raw(s)
+    Returns ProcessedResponse with:
+    - content: Text with [1], [2,3] style citations (1-indexed)
+    - sources: Open WebUI format sources array
+    - cited_urls: List of cited URLs for status display
+    """
+    if not raw_text:
+        return ProcessedResponse("", [], [])
+
+    # Extract source information from raw text BEFORE cleaning
+    source_map = _extract_sources_from_raw(raw_text)
 
     # Try to extract content from <answer> tags if present
-    answer_match = re.search(r"<answer>(.*?)</answer>", s, re.DOTALL | re.IGNORECASE)
+    answer_match = re.search(
+        r"<answer>(.*?)</answer>", raw_text, re.DOTALL | re.IGNORECASE
+    )
     if answer_match:
         cleaned = answer_match.group(1)
     else:
         # No answer tags, try stripping think blocks first
-        cleaned = re.sub(r"<think>.*?</think>", "", s, flags=re.DOTALL | re.IGNORECASE)
+        cleaned = re.sub(
+            r"<think>.*?</think>", "", raw_text, flags=re.DOTALL | re.IGNORECASE
+        )
 
         # If nothing left after stripping think blocks, extract content FROM think blocks
         if not cleaned.strip():
             think_matches = re.findall(
-                r"<think>(.*?)</think>", s, re.DOTALL | re.IGNORECASE
+                r"<think>(.*?)</think>", raw_text, re.DOTALL | re.IGNORECASE
             )
             if think_matches:
                 cleaned = think_matches[-1]
@@ -201,55 +215,60 @@ def _clean_text(s: str, include_sources: bool = True) -> str:
     for pat, repl in _STRIP_PATTERNS:
         cleaned = re.sub(pat, repl, cleaned, flags=re.DOTALL | re.IGNORECASE)
 
-    # Extract citation IDs and build mapping to letter-based IDs
+    # Find all citation IDs in order of first appearance
     citation_pattern = r'<cite\s+ids?=["\']?([^"\'>\s]+)["\']?[^>]*>([^<]*)</cite>'
-    cited_ids = []
+    cited_ids_ordered = []  # Unique IDs in order of appearance
+
     for match in re.finditer(citation_pattern, cleaned, re.IGNORECASE):
         ids_str = match.group(1)
         for cid in ids_str.split(","):
             cid = cid.strip()
-            if cid and cid not in cited_ids:
-                cited_ids.append(cid)
+            if cid and cid not in cited_ids_ordered:
+                cited_ids_ordered.append(cid)
 
-    # Create mapping from original IDs to letter-based IDs
-    id_mapping = {}
-    prefix_to_letter = {}
-    for idx, original_id in enumerate(cited_ids):
-        # Split ID into prefix and suffix
-        if "-" in original_id:
-            prefix, suffix = original_id.rsplit("-", 1)
-        else:
-            prefix, suffix = original_id, ""
+    # Create mapping: original_id -> 1-indexed number for Open WebUI
+    id_to_number = {cid: idx + 1 for idx, cid in enumerate(cited_ids_ordered)}
 
-        if prefix not in prefix_to_letter:
-            prefix_to_letter[prefix] = _number_to_letters(len(prefix_to_letter))
+    # Build Open WebUI sources array (1-indexed, matches citation numbers)
+    openwebui_sources = []
+    cited_urls = []
 
-        letter = prefix_to_letter[prefix]
-        new_id = f"{letter}-{suffix}" if suffix else letter
-        id_mapping[original_id] = new_id
+    for cid in cited_ids_ordered:
+        source_info = source_map.get(cid, {})
+        url = source_info.get("url", "")
+        title = source_info.get("title", f"Source {cid}")
+        snippet = source_info.get("snippet", "")
 
-    # Convert citations to markdown superscript links
+        if url:
+            cited_urls.append(url)
+
+        # Open WebUI source format
+        openwebui_sources.append(
+            {
+                "source": {"name": title if not url else url, "url": url or ""},
+                "document": [snippet] if snippet else [title],
+                "metadata": [{"source": url}] if url else [{"source": title}],
+            }
+        )
+
+    # Convert citations to Open WebUI [1], [2,3] format
     def replace_citation(match):
         ids_str = match.group(1)
         cited_text = match.group(2)
 
-        # Build superscript references
-        refs = []
+        # Build numeric references
+        numbers = []
         for cid in ids_str.split(","):
             cid = cid.strip()
-            letter_id = id_mapping.get(cid, cid)
-            source = sources.get(cid, {})
-            url = source.get("url")
+            num = id_to_number.get(cid)
+            if num:
+                numbers.append(str(num))
 
-            if url:
-                # Create markdown link with superscript
-                refs.append(f"[^{letter_id}^]({url})")
-            else:
-                # No URL available, just show the reference
-                refs.append(f"[{letter_id}]")
-
-        ref_str = "".join(refs)
-        return f"{cited_text}{ref_str}"
+        if numbers:
+            # Open WebUI expects [1] or [1,2,3] format
+            ref_str = f"[{','.join(numbers)}]"
+            return f"{cited_text}{ref_str}"
+        return cited_text
 
     cleaned = re.sub(citation_pattern, replace_citation, cleaned, flags=re.IGNORECASE)
 
@@ -277,53 +296,43 @@ def _clean_text(s: str, include_sources: bool = True) -> str:
 
     result = cleaned.strip()
 
-    # If after all cleaning we have very little content, try harder to extract something useful
+    # If after all cleaning we have very little content, try harder
     if len(result) < 5:
         think_matches = re.findall(
-            r"<think>(.*?)</think>", s, re.DOTALL | re.IGNORECASE
+            r"<think>(.*?)</think>", raw_text, re.DOTALL | re.IGNORECASE
         )
         if think_matches:
             think_content = think_matches[-1].strip()
             if len(think_content) > 10:
-                return think_content
+                return ProcessedResponse(think_content, openwebui_sources, cited_urls)
 
-        if "<answer>" in s.lower():
-            return "4"
-        return "I apologize, but I wasn't able to complete the research. Please try rephrasing your question."
+        if "<answer>" in raw_text.lower():
+            return ProcessedResponse("4", openwebui_sources, cited_urls)
+        return ProcessedResponse(
+            "I apologize, but I wasn't able to complete the research. Please try rephrasing your question.",
+            [],
+            [],
+        )
 
-    # Append sources section if we have any with URLs
-    if include_sources and sources:
-        sources_with_urls = [
-            (id_mapping.get(sid, sid), info)
-            for sid, info in sources.items()
-            if info.get("url") and sid in cited_ids
-        ]
-
-        if sources_with_urls:
-            result += "\n\n---\n**Sources:**\n"
-            for letter_id, info in sorted(sources_with_urls, key=lambda x: x[0]):
-                title = info.get("title", "Source")
-                url = info.get("url", "")
-                if url:
-                    result += f"- [{letter_id}] [{title}]({url})\n"
-
-    return result
+    return ProcessedResponse(result, openwebui_sources, cited_urls)
 
 
-async def _run_agent(prompt: str) -> str:
+async def _run_agent(prompt: str) -> ProcessedResponse:
     """
-    Run the DR-Tulu agent and return the cleaned final answer.
-    Uses long_form dataset_name for comprehensive responses with citations.
+    Run the DR-Tulu agent and return processed response with citations.
+    Uses long_form dataset_name for comprehensive responses.
     """
     wf = get_workflow()
     try:
         # Use long_form dataset_name for comprehensive answers (matches CLI behavior)
         result = await wf(problem=prompt, dataset_name="long_form", verbose=False)
         raw_text = result.get("generated_text", "")
-        return _clean_text(raw_text)
+        return _process_response(raw_text)
     except Exception as e:
         logger.error(f"Agent error: {e}")
-        return f"I encountered an error while researching: {str(e)}"
+        return ProcessedResponse(
+            f"I encountered an error while researching: {str(e)}", [], []
+        )
 
 
 @app.get("/v1/models")
@@ -344,8 +353,11 @@ async def models():
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     """
-    OpenAI-compatible chat completions endpoint.
-    Runs DR-Tulu agent and streams clean response.
+    OpenAI-compatible chat completions endpoint with Open WebUI native citation support.
+
+    Returns:
+    - Streaming: SSE chunks with content, final chunk includes sources
+    - Non-streaming: Full response with sources array for citation chips
     """
     try:
         body = await request.json()
@@ -385,26 +397,58 @@ async def chat_completions(request: Request):
     # Run the agent
     start_time = time.time()
     try:
-        answer = await asyncio.wait_for(
+        response = await asyncio.wait_for(
             _run_agent(prompt),
             timeout=180,  # 3 minute timeout
         )
     except asyncio.TimeoutError:
-        answer = "I'm sorry, the research took too long. Please try a simpler query."
+        response = ProcessedResponse(
+            "I'm sorry, the research took too long. Please try a simpler query.", [], []
+        )
     except Exception as e:
         logger.error(f"Agent failed: {e}")
-        answer = f"Research failed: {str(e)}"
+        response = ProcessedResponse(f"Research failed: {str(e)}", [], [])
 
     elapsed = time.time() - start_time
-    logger.info(f"Agent completed in {elapsed:.1f}s, answer length: {len(answer)}")
+    logger.info(
+        f"Agent completed in {elapsed:.1f}s, content length: {len(response.content)}, sources: {len(response.sources)}"
+    )
 
     if stream:
-        # Stream the response in chunks for better UX
+        # Stream the response in chunks, include sources in metadata
         async def stream_response():
-            # Split answer into chunks for streaming effect
+            content = response.content
+            sources = response.sources
+            cited_urls = response.cited_urls
+
+            # First, send status update if we have sources (thinking panel)
+            if cited_urls:
+                status_data = {
+                    "id": f"chatcmpl-{int(time.time())}",
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": DR_TULU_MODEL,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"role": "assistant"},
+                            "finish_reason": None,
+                        }
+                    ],
+                    # Open WebUI status format for thinking panel
+                    "status": {
+                        "done": True,
+                        "action": "web_search",
+                        "description": f"Searched {len(cited_urls)} sources",
+                        "urls": cited_urls[:10],  # Limit to 10 URLs for display
+                    },
+                }
+                yield f"data: {json.dumps(status_data)}\n\n"
+
+            # Stream content in chunks for better UX
             chunk_size = 50  # characters per chunk
             chunks = [
-                answer[i : i + chunk_size] for i in range(0, len(answer), chunk_size)
+                content[i : i + chunk_size] for i in range(0, len(content), chunk_size)
             ]
 
             for i, chunk in enumerate(chunks):
@@ -418,13 +462,20 @@ async def chat_completions(request: Request):
                         {
                             "index": 0,
                             "delta": {
-                                "role": "assistant" if i == 0 else None,
+                                "role": "assistant"
+                                if i == 0 and not cited_urls
+                                else None,
                                 "content": chunk,
                             },
                             "finish_reason": "stop" if is_last else None,
                         }
                     ],
                 }
+
+                # On last chunk, include sources for Open WebUI citation rendering
+                if is_last and sources:
+                    data["sources"] = sources
+
                 # Remove None values from delta
                 data["choices"][0]["delta"] = {
                     k: v
@@ -445,7 +496,7 @@ async def chat_completions(request: Request):
             },
         )
     else:
-        # Non-streaming response
+        # Non-streaming response with sources
         return JSONResponse(
             {
                 "id": f"chatcmpl-{int(time.time())}",
@@ -457,15 +508,16 @@ async def chat_completions(request: Request):
                         "index": 0,
                         "message": {
                             "role": "assistant",
-                            "content": answer,
+                            "content": response.content,
                         },
                         "finish_reason": "stop",
                     }
                 ],
+                "sources": response.sources,  # Open WebUI sources array
                 "usage": {
                     "prompt_tokens": len(prompt.split()),
-                    "completion_tokens": len(answer.split()),
-                    "total_tokens": len(prompt.split()) + len(answer.split()),
+                    "completion_tokens": len(response.content.split()),
+                    "total_tokens": len(prompt.split()) + len(response.content.split()),
                 },
             }
         )
