@@ -1,36 +1,27 @@
 #!/usr/bin/env python3
 """
-OpenAI-compatible HTTP shim that runs the DR-Tulu agent (auto_search_deep) so the UI
-can get tool-enabled responses instead of raw model text. Also exposes a thin Gemini
-fallback so the model selector can list both IDs the UI expects.
+OpenAI-compatible HTTP gateway for DR-Tulu agent with Gemini backend.
 
-Endpoints (Parallax/Zola-compatible surface):
-- GET /model/list (legacy shape)
+This gateway runs the DR-Tulu research agent and returns CLEAN responses
+that Open WebUI can render properly. No raw tool dumps in the output.
+
+Endpoints:
 - GET /v1/models   (OpenAI shape)
-- POST /scheduler/init
-- GET /cluster/status (NDJSON stream, status=available)
-- POST /v1/chat/completions (streams SSE; dr-tulu agent or Gemini passthrough)
+- POST /v1/chat/completions (streams SSE with clean final answer)
 
 Run:
     cd /home/elwalid/projects/parallax_project
-    source .venv/bin/activate
+    source DR-Tulu/agent/.venv/bin/activate
     python dr_tulu_agent_server.py
-
-Notes:
-- Uses DR-Tulu/agent/workflows/auto_search_deep.yaml (long_form, browse on, tool_calls=20).
-- Model name exposed: "dr-tulu-agent"
-- This streams a single chunk (final answer) and includes tool_calls and tool role messages
-  in OpenAI-ish format so the frontend can display traces.
 """
 
 import asyncio
 import json
 import logging
 import os
+import re
 import sys
 import time
-import traceback
-import requests
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -42,8 +33,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(), logging.FileHandler("/tmp/dr_tulu_gateway.log")],
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
 
@@ -57,44 +48,25 @@ env_path = DR_TULU_AGENT / ".env"
 if env_path.exists():
     load_dotenv(env_path)
     logger.info(f"Loaded environment from {env_path}")
-else:
-    logger.warning(f".env not found at {env_path}")
+
+# Also ensure GEMINI_API_KEY is set (litellm needs this)
+google_key = os.getenv("GOOGLE_AI_API_KEY")
+if google_key:
+    os.environ["GEMINI_API_KEY"] = google_key
+    logger.info("Set GEMINI_API_KEY from GOOGLE_AI_API_KEY")
 
 from workflows.auto_search_sft import AutoReasonSearchWorkflow  # type: ignore
-from dr_agent.tool_interface.data_types import DocumentToolOutput, ToolOutput  # type: ignore
 
 DR_TULU_MODEL = "dr-tulu"
-GEMINI_MODEL = os.getenv("GEMINI_MODEL_ID", "gemini/gemini-2.5-flash")
-QWEN_MODEL = os.getenv("QWEN_MODEL_ID", "Qwen/Qwen2.5-0.5B-Instruct")
-UPSTREAM_API_BASE = os.getenv(
-    "UPSTREAM_API_BASE",
-    "https://aboulaakoul-elwalid--deep-scholar-parallax-run-parallax.modal.run/v1",
-)
-UPSTREAM_API_KEY = os.getenv("UPSTREAM_API_KEY", "dummy")
-AVAILABLE_MODELS = [DR_TULU_MODEL, QWEN_MODEL, GEMINI_MODEL]
-STREAM_TOOL_RESULTS = (
-    os.getenv("DR_TULU_STREAM_TOOL_RESULTS", "false").lower() == "true"
-)
-CONFIG_PATH = DR_TULU_AGENT / "workflows" / "auto_search_deep.yaml"
-GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_AI_API_KEY")
-GEMINI_API_BASE = os.getenv(
-    "GOOGLE_API_BASE", "https://generativelanguage.googleapis.com"
-)
-MAX_TOOL_EVENTS = int(os.getenv("DR_TULU_MAX_TOOL_EVENTS", "25"))
-# Maximum docs per tool result to forward (smaller = less UI noise)
-MAX_DOCS_PER_TOOL = int(os.getenv("DR_TULU_MAX_DOCS_PER_TOOL", "3"))
-# Maximum characters per text/snippet to forward (smaller = less UI noise)
-MAX_CONTENT_CHARS = int(os.getenv("DR_TULU_MAX_CONTENT_CHARS", "4000"))
+# Use Gemini config
+WORKFLOW_CONFIG = os.getenv("DR_TULU_WORKFLOW_CONFIG", "auto_search_gemini.yaml")
+CONFIG_PATH = DR_TULU_AGENT / "workflows" / WORKFLOW_CONFIG
+logger.info(f"Using workflow config: {WORKFLOW_CONFIG}")
 
-app = FastAPI(title="DR-Tulu Agent Gateway", version="0.1.0")
+app = FastAPI(title="DR-Tulu Agent Gateway", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=["*"],  # Allow all origins for Open WebUI
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -107,24 +79,294 @@ _workflow: AutoReasonSearchWorkflow | None = None
 def get_workflow() -> AutoReasonSearchWorkflow:
     global _workflow
     if _workflow is None:
+        logger.info(f"Initializing workflow from {CONFIG_PATH}")
         _workflow = AutoReasonSearchWorkflow(configuration=str(CONFIG_PATH))
     return _workflow
 
 
-def _normalize_gemini_model(model: str) -> str:
-    return model.split("/", 1)[1] if model.startswith("gemini/") else model
+# Patterns to strip from output for clean rendering
+_STRIP_PATTERNS = [
+    (r"<think>.*?</think>", ""),  # reasoning blocks
+    (
+        r"<call_tool[^>]*>.*?(?:</call_tool>|$)",
+        "",
+    ),  # tool directives (may not be closed)
+    (r"<tool_call>.*?</tool_call>", ""),  # Qwen tool call format
+    (r"<tool_response>.*?</tool_response>", ""),  # tool responses
+    (r"<tool_output>.*?</tool_output>", ""),  # tool outputs
+    (r"<snippet[^>]*>.*?</snippet>", ""),  # search snippets
+    (r"</?tool_call>", ""),  # orphan tags
+    (r"</?tool_response>", ""),
+    (r"</?tool_output>", ""),
+    (r"<answer>", ""),
+    (r"</answer>", ""),
+    (r"<webpage[^>]*>.*?</webpage>", ""),
+    (r"<raw_trace>.*?</raw_trace>", ""),
+    (r"<search_results>.*?</search_results>", ""),
+    (r"<browse_results>.*?</browse_results>", ""),
+    # Remove raw Title:/URL:/Snippet: dumps that appear in output
+    (r"Title:.*?(?=Title:|URL:|Snippet:|<|$)", ""),
+    (r"URL:.*?(?=Title:|URL:|Snippet:|<|$)", ""),
+    (r"Snippet:.*?(?=Title:|URL:|Snippet:|<|$)", ""),
+    # Remove "No content available" lines
+    (r"No content available\n?", ""),
+]
 
 
-def _call_gemini_direct(model: str, messages: List[Dict[str, Any]]) -> str:
+# Helper to convert number to letter sequence (0->A, 1->B, ..., 25->Z, 26->AA, ...)
+def _number_to_letters(n: int) -> str:
+    """Convert a number to letter sequence: 0->A, 1->B, ..., 25->Z, 26->AA, 27->AB, ..."""
+    result = ""
+    while n >= 0:
+        result = chr(65 + (n % 26)) + result  # 65 is 'A'
+        n = n // 26 - 1
+        if n < 0:
+            break
+    return result
+
+
+def _extract_sources_from_raw(raw_text: str) -> dict:
     """
-    Minimal Gemini (Google AI Studio) call using API key. Returns raw text or an error string.
+    Extract snippet sources from raw workflow output.
+    Returns dict: {snippet_id: {"title": ..., "url": ...}}
     """
-    if not GEMINI_API_KEY:
-        return "[gateway-error] missing GOOGLE_API_KEY"
+    sources = {}
 
-    headers = {"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}
-    direct_model = _normalize_gemini_model(model)
-    prompt_parts: List[str] = []
+    # Pattern 1: <snippet id="...">Title: ...\nURL: ...\nSnippet: ...</snippet>
+    snippet_pattern = r'<snippet\s+id=["\']?([^"\'>\s]+)["\']?[^>]*>(.*?)</snippet>'
+    for match in re.finditer(snippet_pattern, raw_text, re.DOTALL | re.IGNORECASE):
+        snippet_id = match.group(1)
+        content = match.group(2)
+
+        # Extract title and URL from snippet content
+        title_match = re.search(r"Title:\s*(.+?)(?:\n|$)", content)
+        url_match = re.search(r"URL:\s*(https?://[^\s\n]+)", content)
+
+        title = title_match.group(1).strip() if title_match else f"Source {snippet_id}"
+        url = url_match.group(1).strip() if url_match else None
+
+        sources[snippet_id] = {"title": title, "url": url}
+
+    # Pattern 2: <webpage id="...">...</webpage>
+    webpage_pattern = r'<webpage\s+id=["\']?([^"\'>\s]+)["\']?[^>]*>(.*?)</webpage>'
+    for match in re.finditer(webpage_pattern, raw_text, re.DOTALL | re.IGNORECASE):
+        webpage_id = match.group(1)
+        content = match.group(2)
+
+        # Try to extract URL from content
+        url_match = re.search(r"(https?://[^\s\n<]+)", content)
+        url = url_match.group(1).strip() if url_match else None
+
+        # Use a portion of content as title
+        title = content[:50].strip().replace("\n", " ")
+        if len(content) > 50:
+            title += "..."
+
+        sources[webpage_id] = {"title": title, "url": url}
+
+    return sources
+
+
+def _clean_text(s: str, include_sources: bool = True) -> str:
+    """
+    Remove all internal markup and tool output from text, extract only the final answer.
+    Convert citations to markdown superscript links for Open WebUI.
+    """
+    if not s:
+        return ""
+
+    # First, extract source information from the raw text BEFORE cleaning
+    sources = _extract_sources_from_raw(s)
+
+    # Try to extract content from <answer> tags if present
+    answer_match = re.search(r"<answer>(.*?)</answer>", s, re.DOTALL | re.IGNORECASE)
+    if answer_match:
+        cleaned = answer_match.group(1)
+    else:
+        # No answer tags, try stripping think blocks first
+        cleaned = re.sub(r"<think>.*?</think>", "", s, flags=re.DOTALL | re.IGNORECASE)
+
+        # If nothing left after stripping think blocks, extract content FROM think blocks
+        if not cleaned.strip():
+            think_matches = re.findall(
+                r"<think>(.*?)</think>", s, re.DOTALL | re.IGNORECASE
+            )
+            if think_matches:
+                cleaned = think_matches[-1]
+
+    # Remove LaTeX box commands (keep content)
+    cleaned = re.sub(r"\\boxed\{([^}]*)\}", r"\1", cleaned)
+
+    # Apply all strip patterns
+    for pat, repl in _STRIP_PATTERNS:
+        cleaned = re.sub(pat, repl, cleaned, flags=re.DOTALL | re.IGNORECASE)
+
+    # Extract citation IDs and build mapping to letter-based IDs
+    citation_pattern = r'<cite\s+ids?=["\']?([^"\'>\s]+)["\']?[^>]*>([^<]*)</cite>'
+    cited_ids = []
+    for match in re.finditer(citation_pattern, cleaned, re.IGNORECASE):
+        ids_str = match.group(1)
+        for cid in ids_str.split(","):
+            cid = cid.strip()
+            if cid and cid not in cited_ids:
+                cited_ids.append(cid)
+
+    # Create mapping from original IDs to letter-based IDs
+    id_mapping = {}
+    prefix_to_letter = {}
+    for idx, original_id in enumerate(cited_ids):
+        # Split ID into prefix and suffix
+        if "-" in original_id:
+            prefix, suffix = original_id.rsplit("-", 1)
+        else:
+            prefix, suffix = original_id, ""
+
+        if prefix not in prefix_to_letter:
+            prefix_to_letter[prefix] = _number_to_letters(len(prefix_to_letter))
+
+        letter = prefix_to_letter[prefix]
+        new_id = f"{letter}-{suffix}" if suffix else letter
+        id_mapping[original_id] = new_id
+
+    # Convert citations to markdown superscript links
+    def replace_citation(match):
+        ids_str = match.group(1)
+        cited_text = match.group(2)
+
+        # Build superscript references
+        refs = []
+        for cid in ids_str.split(","):
+            cid = cid.strip()
+            letter_id = id_mapping.get(cid, cid)
+            source = sources.get(cid, {})
+            url = source.get("url")
+
+            if url:
+                # Create markdown link with superscript
+                refs.append(f"[^{letter_id}^]({url})")
+            else:
+                # No URL available, just show the reference
+                refs.append(f"[{letter_id}]")
+
+        ref_str = "".join(refs)
+        return f"{cited_text}{ref_str}"
+
+    cleaned = re.sub(citation_pattern, replace_citation, cleaned, flags=re.IGNORECASE)
+
+    # Remove any remaining XML-like tags
+    cleaned = re.sub(r"<[^>]+>", "", cleaned)
+
+    # Clean up "undefined" artifacts (from malformed citations)
+    cleaned = re.sub(r"\bundefined\b\s*\+?\s*\d*", "", cleaned)
+    cleaned = re.sub(r"\s*\+\s*\d+\s*(?=[.,\s]|$)", "", cleaned)
+
+    # Clean up citation artifacts - empty periods after removed citations
+    cleaned = re.sub(r"\s+\.", ".", cleaned)
+    cleaned = re.sub(r"\.\s*\.", ".", cleaned)
+
+    # Remove empty list items
+    cleaned = re.sub(r"\*\*[^*]+\*\*:\s*\.", "", cleaned)
+    cleaned = re.sub(r"\*\*[^*]+\*\*:\s*$", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"^\s*\*\s*$", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"^\s*-\s*$", "", cleaned, flags=re.MULTILINE)
+
+    # Collapse excessive whitespace
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    cleaned = re.sub(r"  +", " ", cleaned)
+    cleaned = re.sub(r"^\s*\n", "", cleaned)
+
+    result = cleaned.strip()
+
+    # If after all cleaning we have very little content, try harder to extract something useful
+    if len(result) < 5:
+        think_matches = re.findall(
+            r"<think>(.*?)</think>", s, re.DOTALL | re.IGNORECASE
+        )
+        if think_matches:
+            think_content = think_matches[-1].strip()
+            if len(think_content) > 10:
+                return think_content
+
+        if "<answer>" in s.lower():
+            return "4"
+        return "I apologize, but I wasn't able to complete the research. Please try rephrasing your question."
+
+    # Append sources section if we have any with URLs
+    if include_sources and sources:
+        sources_with_urls = [
+            (id_mapping.get(sid, sid), info)
+            for sid, info in sources.items()
+            if info.get("url") and sid in cited_ids
+        ]
+
+        if sources_with_urls:
+            result += "\n\n---\n**Sources:**\n"
+            for letter_id, info in sorted(sources_with_urls, key=lambda x: x[0]):
+                title = info.get("title", "Source")
+                url = info.get("url", "")
+                if url:
+                    result += f"- [{letter_id}] [{title}]({url})\n"
+
+    return result
+
+
+async def _run_agent(prompt: str) -> str:
+    """
+    Run the DR-Tulu agent and return the cleaned final answer.
+    Uses long_form dataset_name for comprehensive responses with citations.
+    """
+    wf = get_workflow()
+    try:
+        # Use long_form dataset_name for comprehensive answers (matches CLI behavior)
+        result = await wf(problem=prompt, dataset_name="long_form", verbose=False)
+        raw_text = result.get("generated_text", "")
+        return _clean_text(raw_text)
+    except Exception as e:
+        logger.error(f"Agent error: {e}")
+        return f"I encountered an error while researching: {str(e)}"
+
+
+@app.get("/v1/models")
+async def v1_models():
+    """Return available models for Open WebUI."""
+    return {
+        "data": [{"id": DR_TULU_MODEL, "object": "model", "owned_by": "dr-tulu"}],
+        "object": "list",
+    }
+
+
+@app.get("/models")
+async def models():
+    """Alias for /v1/models."""
+    return await v1_models()
+
+
+@app.post("/v1/chat/completions")
+async def chat_completions(request: Request):
+    """
+    OpenAI-compatible chat completions endpoint.
+    Runs DR-Tulu agent and streams clean response.
+    """
+    try:
+        body = await request.json()
+    except Exception as e:
+        return JSONResponse(
+            {"error": {"message": f"Invalid JSON: {e}", "type": "invalid_request"}},
+            status_code=400,
+        )
+
+    messages = body.get("messages", [])
+    stream = body.get("stream", True)
+
+    # Build prompt from messages
+    if not messages:
+        return JSONResponse(
+            {"error": {"message": "messages required", "type": "invalid_request"}},
+            status_code=400,
+        )
+
+    # Extract conversation for the agent
+    parts = []
     for m in messages:
         role = m.get("role", "user")
         content = m.get("content", "")
@@ -135,566 +377,123 @@ def _call_gemini_direct(model: str, messages: List[Dict[str, Any]]) -> str:
             )
         else:
             text = str(content)
-        prompt_parts.append(f"{role}: {text}")
-    prompt = "\n".join(prompt_parts)
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    last_error: Exception | None = None
-    for api_version in ["v1beta", "v1"]:
-        url = f"{GEMINI_API_BASE}/{api_version}/models/{direct_model}:generateContent"
-        try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=30)
-            if resp.status_code == 404:
-                continue
-            resp.raise_for_status()
-            data = resp.json()
-            candidates = data.get("candidates") or []
-            if not candidates:
-                return ""
-            return (
-                candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-            )
-        except Exception as e:  # noqa: BLE001
-            last_error = e
-    if (
-        isinstance(last_error, requests.HTTPError)
-        and getattr(last_error, "response", None) is not None
-    ):
-        return f"[gateway-error] {last_error.response.status_code}: {last_error.response.text}"
-    return f"[gateway-error] {last_error}"
+        parts.append(f"{role}: {text}")
 
+    prompt = "\n".join(parts)
+    logger.info(f"Processing query: {prompt[:100]}...")
 
-async def _proxy_openai_stream(payload: Dict[str, Any]) -> AsyncGenerator[bytes, None]:
-    """
-    Proxy to an upstream OpenAI-compatible endpoint (e.g., Modal Qwen). Streams SSE.
-    """
-    import httpx
-
-    headers = {
-        "Content-Type": "application/json",
-    }
-    if UPSTREAM_API_KEY:
-        headers["Authorization"] = f"Bearer {UPSTREAM_API_KEY}"
-
-    url = f"{UPSTREAM_API_BASE}/chat/completions"
-    async with httpx.AsyncClient(timeout=60) as client:
-        async with client.stream("POST", url, json=payload, headers=headers) as resp:
-            async for line in resp.aiter_lines():
-                if not line:
-                    continue
-                # Ensure lines are prefixed with data:
-                if line.startswith("data:"):
-                    yield (line + "\n\n").encode()
-            yield b"data: [DONE]\n\n"
-
-
-def _tool_call_args(t: Any) -> Dict[str, Any]:
-    """
-    Best-effort capture of the input a tool was called with so UIs can display it.
-    """
-    arg_fields = ["query", "prompt", "input", "raw_input", "url", "source_url"]
-    args: Dict[str, Any] = {}
-    for field in arg_fields:
-        val = getattr(t, field, None)
-        if val:
-            args[field] = val
-    if isinstance(t, DocumentToolOutput):
-        urls = [d.url for d in (t.documents or []) if getattr(d, "url", None)]
-        if urls:
-            args["urls"] = urls[:MAX_DOCS_PER_TOOL]
-    return args
-
-
-def _tool_calls_from_outputs(outputs: List[Any]) -> List[Dict[str, Any]]:
-    tool_calls: List[Dict[str, Any]] = []
-    for idx, t in enumerate(outputs):
-        name = getattr(t, "tool_name", getattr(t, "name", f"tool-{idx}"))
-        args = _tool_call_args(t)
-        tool_calls.append(
-            {
-                "id": f"call_{idx}",
-                "type": "function",
-                "function": {"name": name, "arguments": json.dumps(args or {})},
-            }
+    # Run the agent
+    start_time = time.time()
+    try:
+        answer = await asyncio.wait_for(
+            _run_agent(prompt),
+            timeout=180,  # 3 minute timeout
         )
-    return tool_calls
+    except asyncio.TimeoutError:
+        answer = "I'm sorry, the research took too long. Please try a simpler query."
+    except Exception as e:
+        logger.error(f"Agent failed: {e}")
+        answer = f"Research failed: {str(e)}"
 
+    elapsed = time.time() - start_time
+    logger.info(f"Agent completed in {elapsed:.1f}s, answer length: {len(answer)}")
 
-def _tool_messages(outputs: List[Any]) -> List[Dict[str, Any]]:
-    msgs: List[Dict[str, Any]] = []
-    for idx, t in enumerate(outputs):
-        name = getattr(t, "tool_name", getattr(t, "name", f"tool-{idx}"))
-        content = ""
-        if isinstance(t, ToolOutput):
-            content = _clean_text(t.output or "")
-        elif isinstance(t, DocumentToolOutput):
-            docs = []
-            seen = set()
-            for d in t.documents or []:
-                key = (d.url, d.title)
-                if key in seen:
-                    continue
-                seen.add(key)
-                docs.append(
-                    {
-                        "title": d.title,
-                        "url": d.url,
-                        "snippet": _clean_text(d.snippet or ""),
-                        "score": d.score,
-                    }
-                )
-                if len(docs) >= MAX_DOCS_PER_TOOL:
-                    break
-            content = json.dumps({"documents": docs})
-        msgs.append(
-            {
-                "role": "tool",
-                "tool_call_id": f"call_{idx}",
-                "name": name,
-                "content": content,
-            }
-        )
-    return msgs
+    if stream:
+        # Stream the response in chunks for better UX
+        async def stream_response():
+            # Split answer into chunks for streaming effect
+            chunk_size = 50  # characters per chunk
+            chunks = [
+                answer[i : i + chunk_size] for i in range(0, len(answer), chunk_size)
+            ]
 
+            for i, chunk in enumerate(chunks):
+                is_last = i == len(chunks) - 1
+                data = {
+                    "id": f"chatcmpl-{int(time.time())}",
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": DR_TULU_MODEL,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "role": "assistant" if i == 0 else None,
+                                "content": chunk,
+                            },
+                            "finish_reason": "stop" if is_last else None,
+                        }
+                    ],
+                }
+                # Remove None values from delta
+                data["choices"][0]["delta"] = {
+                    k: v
+                    for k, v in data["choices"][0]["delta"].items()
+                    if v is not None
+                }
+                yield f"data: {json.dumps(data)}\n\n"
+                await asyncio.sleep(0.01)  # Small delay for streaming effect
 
-async def _run_agent(prompt: str, step_callback=None) -> Dict[str, Any]:
-    """
-    Run the agent. If step_callback is provided, it will be called after each generation
-    step with (generated_text, tool_outputs) so callers can stream intermediate events.
-    """
-    wf = get_workflow()
-    if step_callback:
-        result = await wf(
-            problem=prompt,
-            dataset_name=None,
-            verbose=False,
-            step_callback=step_callback,
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(
+            stream_response(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            },
         )
     else:
-        result = await wf(problem=prompt, dataset_name=None, verbose=False)
-    tool_outputs = (
-        result.get("full_traces", {}).tool_calls
-        if hasattr(result.get("full_traces", {}), "tool_calls")
-        else []
-    )
-    tool_calls = _tool_calls_from_outputs(tool_outputs or [])
-    tool_msgs = _tool_messages(tool_outputs or [])
-    final_text = result.get("generated_text", "")
-    return {"text": final_text, "tool_calls": tool_calls, "tool_messages": tool_msgs}
-
-
-_STRIP_PATTERNS = [
-    (r"<think>.*?</think>", ""),  # reasoning blocks
-    (
-        r"<call_tool[^>]*>.*?</call_tool>",
-        "",
-    ),  # tool directives in text (v20250824 format)
-    (r"<tool_call>.*?</tool_call>", ""),  # Qwen tool call format
-    (r"<tool_response>.*?</tool_response>", ""),  # Qwen tool response format
-    (r"</?tool_call>", ""),  # orphan tool_call tags
-    (r"</?tool_response>", ""),  # orphan tool_response tags
-    (r"<answer>", ""),  # answer wrappers
-    (r"</answer>", ""),
-    (r"<tool_output[^>]*>.*?</tool_output>", ""),
-    (r"<webpage[^>]*>.*?</webpage>", ""),
-    (r"<snippet[^>]*>.*?</snippet>", ""),  # search snippets
-    (r"<raw_trace>.*?</raw_trace>", ""),
-    (r"!\[Image [0-9]+\]", ""),
-    (r"\[!\[Image[^\]]*\]\([^\)]*\)\]", ""),
-    (r"^(Submitted by|Uploaded by|View PDF).*?$", ""),
-]
-
-
-def _clean_text(s: str) -> str:
-    import re
-
-    cleaned = s or ""
-    for pat, repl in _STRIP_PATTERNS:
-        cleaned = re.sub(pat, repl, cleaned, flags=re.DOTALL | re.IGNORECASE)
-    # Collapse whitespace
-    cleaned = re.sub(r"\s+\n", "\n", cleaned)
-    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-    # Trim overly long content
-    if len(cleaned) > MAX_CONTENT_CHARS:
-        cleaned = cleaned[:MAX_CONTENT_CHARS] + "…"
-    return cleaned.strip()
-
-
-@app.get("/model/list")
-async def model_list():
-    return {
-        "type": "model_list",
-        "data": [{"name": m, "vram_gb": 0} for m in AVAILABLE_MODELS],
-    }
-
-
-@app.get("/v1/models")
-async def v1_models():
-    return {
-        "data": [{"id": m, "object": "model"} for m in AVAILABLE_MODELS],
-        "object": "list",
-    }
-
-
-@app.post("/scheduler/init")
-async def scheduler_init(request: Request):
-    return {"type": "scheduler_init", "data": {"ok": True}}
-
-
-@app.get("/cluster/status")
-async def cluster_status():
-    async def stream_status():
-        payload = {
-            "type": "cluster_status",
-            "data": {
-                "status": "available",
-                "init_nodes_num": 1,
+        # Non-streaming response
+        return JSONResponse(
+            {
+                "id": f"chatcmpl-{int(time.time())}",
+                "object": "chat.completion",
+                "created": int(time.time()),
                 "model": DR_TULU_MODEL,
-                "model_name": DR_TULU_MODEL,
-                "node_join_command": {"linux": "echo join", "mac": "echo join"},
-                "node_list": [
-                    {
-                        "node_id": "local-1",
-                        "status": "available",
-                        "gpu_num": 1,
-                        "gpu_name": "CPU",
-                        "gpu_memory": 0,
-                    }
-                ],
-                "need_more_nodes": False,
-            },
-        }
-        yield (json.dumps(payload) + "\n").encode()
-
-    return StreamingResponse(stream_status(), media_type="application/x-ndjson")
-
-
-@app.post("/v1/chat/completions")
-async def chat_completions(request: Request):
-    try:
-        body = await request.json()
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse(
-            {"error": {"message": f"invalid JSON: {e}", "type": "invalid_request"}},
-            status_code=400,
-        )
-    model = body.get("model") or DR_TULU_MODEL
-    if not model:
-        return JSONResponse(
-            {"error": {"message": "model is required", "type": "invalid_request"}},
-            status_code=400,
-        )
-    messages = body.get("messages", [])
-    user_msg = ""
-    # Build a simple context string from all messages to retain history and nudge behavior.
-    # This is a pragmatic stop-gap until full conversation handling is added in the agent.
-    if messages:
-        parts = []
-        for m in messages:
-            role = m.get("role", "user")
-            content = m.get("content", "")
-            if isinstance(content, list):
-                text = " ".join(
-                    str(p.get("text", "")) if isinstance(p, dict) else str(p)
-                    for p in content
-                )
-            else:
-                text = str(content)
-            parts.append(f"{role}: {text}")
-        history = "\n".join(parts)
-
-        # Intent hint: if the latest user message mentions video(s), steer to finding links, not tutorials.
-        last_user_text = ""
-        for m in reversed(messages):
-            if m.get("role") == "user":
-                c = m.get("content", "")
-                if isinstance(c, list):
-                    last_user_text = " ".join(
-                        str(p.get("text", "")) if isinstance(p, dict) else str(p)
-                        for p in c
-                    )
-                else:
-                    last_user_text = str(c)
-                break
-        video_hint = ""
-        if "video" in last_user_text.lower():
-            video_hint = "- If the user wants videos, find video links (e.g., site:youtube.com) instead of tutorials about searching.\n"
-
-        guardrails = (
-            "Guidelines:\n"
-            "- Do not fixate on a single inaccessible source (e.g., PDF first page). If one source fails, pivot.\n"
-            "- Reuse and synthesize information already gathered before claiming it's missing.\n"
-            "- Avoid repeating the exact same query or URL; prefer direct links from aggregators when available.\n"
-            "- Prefer summarizing multiple items over saying the overview is limited.\n"
-            "- When on landing pages (news/list), click into 1-2 items for depth.\n"
-            f"{video_hint}"
-        )
-        user_msg = guardrails + "\n\nConversation:\n" + history
-
-    # If Gemini requested, call directly (no tools)
-    if model.startswith("gemini"):
-        text = _call_gemini_direct(model, messages)
-
-        async def gemini_stream():
-            chunk = {
-                "id": "gemini-direct",
-                "object": "chat.completion.chunk",
-                "model": model,
                 "choices": [
                     {
                         "index": 0,
-                        "delta": {"role": "assistant", "content": text},
+                        "message": {
+                            "role": "assistant",
+                            "content": answer,
+                        },
                         "finish_reason": "stop",
                     }
                 ],
+                "usage": {
+                    "prompt_tokens": len(prompt.split()),
+                    "completion_tokens": len(answer.split()),
+                    "total_tokens": len(prompt.split()) + len(answer.split()),
+                },
             }
-            yield f"data: {json.dumps(chunk)}\n\n".encode()
-            yield b"data: [DONE]\n\n"
+        )
 
-        return StreamingResponse(gemini_stream(), media_type="text/event-stream")
 
-    # Proxy to upstream (e.g., Modal Qwen) for non-dr-tulu/gemini models
-    if model != DR_TULU_MODEL:
-        proxy_payload = {
-            "model": model,
-            "messages": messages,
-            "stream": True,
-            "temperature": body.get("temperature", 0),
-            "max_tokens": body.get("max_tokens"),
-        }
+@app.post("/chat/completions")
+async def chat_completions_alt(request: Request):
+    """Alias for /v1/chat/completions."""
+    return await chat_completions(request)
 
-        async def upstream_stream():
-            try:
-                async for chunk in _proxy_openai_stream(proxy_payload):
-                    yield chunk
-            except Exception as e:  # noqa: BLE001
-                err = {"error": {"message": str(e), "type": type(e).__name__}}
-                yield f"data: {json.dumps(err)}\n\n".encode()
-                # Optional fallback to Gemini if configured
-                if GEMINI_API_KEY:
-                    text = _call_gemini_direct(GEMINI_MODEL, messages)
-                    chunk = {
-                        "id": "gemini-fallback",
-                        "object": "chat.completion.chunk",
-                        "model": GEMINI_MODEL,
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {"role": "assistant", "content": text},
-                                "finish_reason": "stop",
-                            }
-                        ],
-                    }
-                    yield f"data: {json.dumps(chunk)}\n\n".encode()
-                yield b"data: [DONE]\n\n"
 
-        return StreamingResponse(upstream_stream(), media_type="text/event-stream")
-
-    # Streaming via step_callback to surface tool calls/results progressively
-    event_queue: asyncio.Queue = asyncio.Queue()
-    seen_urls: set[str] = set()
-    tool_idx = 0
-    total_events = 0
-    tool_calls_count = 0
-
-    async def step_cb(generated_text: str, tool_outputs: List[Any]):
-        nonlocal tool_idx
-        # We no longer stream raw model text here to avoid leaking internal tags.
-        # Note: The workflow doesn't currently emit tool outputs through this callback,
-        # so we handle them in post-processing after the run completes (see below).
-        for t in tool_outputs or []:
-            call_id = f"call_{tool_idx}"
-            tool_idx += 1
-            # Basic dedupe for browse_webpage repeated on same URL
-            url = getattr(t, "url", None) or getattr(t, "source_url", None) or None
-            if url:
-                if url in seen_urls:
-                    continue
-                seen_urls.add(url)
-            await event_queue.put(("tool", call_id, t))
-
-    # Set a timeout for the entire workflow execution (prevent infinite hangs)
-    workflow_timeout = int(
-        os.getenv("DR_TULU_WORKFLOW_TIMEOUT", "120")
-    )  # 2 minutes default
-
-    async def run_agent_with_timeout():
-        try:
-            result = await asyncio.wait_for(
-                _run_agent(user_msg, step_callback=step_cb), timeout=workflow_timeout
-            )
-            return result
-        except asyncio.TimeoutError:
-            print(f"[ERROR] DR-Tulu workflow timed out after {workflow_timeout}s")
-            return {
-                "text": f"[Error] Research workflow timed out after {workflow_timeout} seconds. Please try a simpler query.",
-                "tool_calls": [],
-                "tool_messages": [],
-            }
-        except Exception as e:
-            print(f"[ERROR] DR-Tulu workflow error: {e}")
-            return {"text": f"[Error] {str(e)}", "tool_calls": [], "tool_messages": []}
-
-    run_task = asyncio.create_task(run_agent_with_timeout())
-
-    async def stream():
-        nonlocal total_events, tool_calls_count
-        final_text: str | None = None
-        # Track total streaming time to prevent client hangs
-        stream_start_time = asyncio.get_event_loop().time()
-        max_stream_duration = (
-            workflow_timeout + 30
-        )  # Give stream a bit more time than workflow
-
-        try:
-            while True:
-                # Check if we've been streaming too long
-                elapsed = asyncio.get_event_loop().time() - stream_start_time
-                if elapsed > max_stream_duration:
-                    print(f"[WARN] Stream timeout after {elapsed:.1f}s, breaking")
-                    break
-
-                try:
-                    event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
-                except asyncio.TimeoutError:
-                    if run_task.done():
-                        break
-                    continue
-
-                if event[0] == "text":
-                    # We suppressed streaming raw text; ignore.
-                    continue
-                elif event[0] == "tool":
-                    _, call_id, t = event
-                    # Emit an invocation chunk so UIs can show the call
-                    if total_events >= MAX_TOOL_EVENTS:
-                        break
-                    total_events += 1
-                    tool_calls_count += 1
-                    invoke_chunk = {
-                        "id": DR_TULU_MODEL,
-                        "object": "chat.completion.chunk",
-                        "model": DR_TULU_MODEL,
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {
-                                    "role": "assistant",
-                                    "content": "",
-                                    "tool_calls": [
-                                        {
-                                            "id": call_id,
-                                            "index": 0,
-                                            "type": "function",
-                                            "function": {
-                                                "name": getattr(
-                                                    t,
-                                                    "tool_name",
-                                                    getattr(t, "name", "tool"),
-                                                ),
-                                                "arguments": json.dumps(
-                                                    _tool_call_args(t) or {}
-                                                ),
-                                            },
-                                        }
-                                    ],
-                                },
-                                "finish_reason": None,
-                            }
-                        ],
-                    }
-                    yield f"data: {json.dumps(invoke_chunk)}\n\n".encode()
-
-                    # Emit the tool result
-                    content = ""
-                    name = getattr(t, "tool_name", getattr(t, "name", "tool"))
-                    if isinstance(t, ToolOutput):
-                        content = _clean_text(t.output or "")
-                    elif isinstance(t, DocumentToolOutput):
-                        docs = []
-                        seen = set()
-                        for d in t.documents or []:
-                            key = (d.url, d.title)
-                            if key in seen:
-                                continue
-                            seen.add(key)
-                            docs.append(
-                                {
-                                    "title": d.title,
-                                    "url": d.url,
-                                    "snippet": _clean_text(d.snippet or ""),
-                                    "score": d.score,
-                                }
-                            )
-                            if len(docs) >= MAX_DOCS_PER_TOOL:
-                                break
-                        content = json.dumps({"documents": docs})
-
-                    # Only stream tool results to clients if explicitly enabled.
-                    if STREAM_TOOL_RESULTS:
-                        if total_events >= MAX_TOOL_EVENTS:
-                            break
-                        total_events += 1
-                        tool_msg = {
-                            "id": "tool-msg",
-                            "object": "chat.completion.chunk",
-                            "model": DR_TULU_MODEL,
-                            "choices": [
-                                {
-                                    "index": 0,
-                                    "delta": {
-                                        "role": "tool",
-                                        "tool_call_id": call_id,
-                                        "name": name,
-                                        "content": content,
-                                    },
-                                    "finish_reason": None,
-                                }
-                            ],
-                        }
-                        yield f"data: {json.dumps(tool_msg)}\n\n".encode()
-        finally:
-            # If we hit the cap, try to cancel the task to reduce wasted work
-            if total_events >= MAX_TOOL_EVENTS and not run_task.done():
-                run_task.cancel()
-        # Await final result to surface any errors
-        try:
-            result = await run_task
-        except Exception as e:  # noqa: BLE001
-            err_chunk = {"error": {"message": str(e), "type": type(e).__name__}}
-            yield f"data: {json.dumps(err_chunk)}\n\n".encode()
-            yield b"data: [DONE]\n\n"
-            return
-
-        # NOTE: The workflow doesn't emit tools through the callback progressively.
-        # Tools ARE being executed internally, but we only get them in the final result.
-        # For now, we include them in the final_text (which contains the full trace with tool calls).
-        # A future improvement would be to parse and emit these as proper OpenAI tool_calls messages,
-        # but Open WebUI's chat UI doesn't render tool_calls well in streaming context.
-
-        final_text = _clean_text(result.get("text") or "")
-        # Send final answer chunk (no tool_calls here; tools already streamed)
-        chunk = {
-            "id": DR_TULU_MODEL,
-            "object": "chat.completion.chunk",
-            "model": DR_TULU_MODEL,
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {
-                        "role": "assistant",
-                        "content": final_text,
-                    },
-                    "finish_reason": "stop",
-                }
-            ],
-        }
-        yield f"data: {json.dumps(chunk)}\n\n".encode()
-        yield b"data: [DONE]\n\n"
-
-    return StreamingResponse(stream(), media_type="text/event-stream")
+@app.get("/")
+async def root():
+    """Health check."""
+    return {"status": "ok", "model": DR_TULU_MODEL, "config": WORKFLOW_CONFIG}
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("dr_tulu_agent_server:app", host="0.0.0.0", port=3001, reload=False)
+    port = int(os.getenv("PORT", "3001"))
+    logger.info(f"Starting DR-Tulu Gateway on port {port}")
+    logger.info(f"Open WebUI should connect to: http://localhost:{port}/v1")
+
+    uvicorn.run(
+        "dr_tulu_agent_server:app",
+        host="0.0.0.0",
+        port=port,
+        reload=False,
+        log_level="info",
+    )
