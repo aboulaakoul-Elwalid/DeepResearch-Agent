@@ -5,6 +5,12 @@ CLI Gateway for DR-Tulu Deep Research Agent.
 This gateway spawns the CLI as a subprocess and converts its structured output
 to OpenAI-compatible SSE chunks for Open WebUI integration.
 
+Features:
+- Proper OpenAI-compatible streaming with tool_calls and tool outputs
+- <think> tags for collapsible reasoning display
+- Source/citation extraction from tool outputs
+- Clean content without raw XML tags
+
 Models:
 - dr-tulu-quick: Fast research with Modal Qwen-7B (fewer tool calls)
 - dr-tulu-deep: Deep research with Modal Qwen-7B (more comprehensive)
@@ -15,6 +21,7 @@ Usage:
 """
 
 import asyncio
+import html
 import json
 import os
 import re
@@ -23,6 +30,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import AsyncGenerator, Dict, Any, List, Optional
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -63,7 +71,7 @@ AVAILABLE_MODELS = [
     for model_id, cfg in MODEL_CONFIGS.items()
 ]
 
-app = FastAPI(title="DR-Tulu CLI Gateway", version="0.2.0")
+app = FastAPI(title="DR-Tulu CLI Gateway", version="0.3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -74,9 +82,86 @@ app.add_middleware(
 )
 
 
+# ============================================================================
+# Text Processing Utilities
+# ============================================================================
+
+
 def unescape_line(text: str) -> str:
     """Unescape text from line-based output (\\n -> newline)."""
     return text.replace("\\n", "\n").replace("\\\\", "\\")
+
+
+def fix_html_entities(text: str) -> str:
+    """Fix HTML entities like &amp; -> &, &lt; -> <, etc."""
+    return html.unescape(text)
+
+
+def clean_thinking_content(text: str) -> str:
+    """
+    Clean up thinking content by removing raw XML tool call tags.
+
+    Removes patterns like:
+    - <call_tool name="google_search">query</call_tool>
+    - <tool_call>...</tool_tool>
+    """
+    # Remove <call_tool name="...">...</call_tool> patterns
+    text = re.sub(r"<call_tool[^>]*>.*?</call_tool>", "", text, flags=re.DOTALL)
+    # Remove <tool_call>...</tool_call> patterns
+    text = re.sub(r"<tool_call>.*?</tool_call>", "", text, flags=re.DOTALL)
+    # Remove standalone closing tags that might be left
+    text = re.sub(r"</?(call_tool|tool_call)[^>]*>", "", text)
+    # Clean up excessive whitespace
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def extract_sources_from_output(output: str) -> List[Dict[str, Any]]:
+    """
+    Extract source/citation information from tool output.
+
+    Looks for URLs and titles in the output and creates source objects.
+    """
+    sources = []
+
+    # Pattern for markdown links: [title](url)
+    md_links = re.findall(r"\[([^\]]+)\]\(([^)]+)\)", output)
+    for title, url in md_links:
+        if url.startswith("http"):
+            sources.append(
+                {
+                    "id": uuid.uuid4().hex[:8],
+                    "title": fix_html_entities(title),
+                    "url": fix_html_entities(url),
+                }
+            )
+
+    # Pattern for bare URLs
+    bare_urls = re.findall(r'https?://[^\s<>"\')\]]+', output)
+    seen_urls = {s.get("url") for s in sources}
+    for url in bare_urls:
+        clean_url = fix_html_entities(url.rstrip(".,;:"))
+        if clean_url not in seen_urls:
+            # Extract domain as title
+            try:
+                domain = urlparse(clean_url).netloc
+                sources.append(
+                    {
+                        "id": uuid.uuid4().hex[:8],
+                        "title": domain,
+                        "url": clean_url,
+                    }
+                )
+                seen_urls.add(clean_url)
+            except Exception:
+                pass
+
+    return sources[:10]  # Limit to 10 sources per tool output
+
+
+# ============================================================================
+# SSE Chunk Creation
+# ============================================================================
 
 
 def create_sse_chunk(
@@ -84,26 +169,20 @@ def create_sse_chunk(
     role: str = "assistant",
     finish_reason: Optional[str] = None,
     tool_calls: Optional[List[Dict]] = None,
-    is_tool_message: bool = False,
-    tool_call_id: Optional[str] = None,
+    sources: Optional[List[Dict]] = None,
 ) -> str:
     """Create an SSE chunk in OpenAI format."""
     chunk_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
 
     delta: Dict[str, Any] = {}
-    if role and not is_tool_message:
+    if role:
         delta["role"] = role
     if content:
         delta["content"] = content
     if tool_calls:
         delta["tool_calls"] = tool_calls
-
-    if is_tool_message:
-        delta = {
-            "role": "tool",
-            "tool_call_id": tool_call_id or "call_0",
-            "content": content,
-        }
+    if sources:
+        delta["sources"] = sources
 
     chunk = {
         "id": chunk_id,
@@ -120,6 +199,27 @@ def create_sse_chunk(
     }
 
     return f"data: {json.dumps(chunk)}\n\n"
+
+
+def create_tool_output_chunk(
+    tool_call_id: str,
+    content: str,
+    sources: Optional[List[Dict]] = None,
+) -> str:
+    """Create an SSE chunk for tool output (role: tool)."""
+    chunk_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+
+    # Tool output message format
+    data: Dict[str, Any] = {
+        "role": "tool",
+        "tool_call_id": tool_call_id,
+        "content": content,
+    }
+
+    if sources:
+        data["sources"] = sources
+
+    return f"data: {json.dumps(data)}\n\n"
 
 
 async def run_cli_subprocess(
@@ -139,8 +239,10 @@ async def run_cli_subprocess(
 
     Outputs in Open WebUI compatible format:
         - Thinking goes inside <think>...</think> tags (collapsible reasoning)
-        - Tool calls use delta.tool_calls format
-        - Answer is clean content without headers
+        - Tool calls use delta.tool_calls format (shows as tool cards)
+        - Tool outputs use role: "tool" format (with source extraction)
+        - Sources are extracted and included in delta.sources
+        - Answer is clean content with HTML entities fixed
     """
     # Get config for this model
     model_cfg = MODEL_CONFIGS.get(model_name, MODEL_CONFIGS["dr-tulu-deep"])
@@ -184,7 +286,11 @@ async def run_cli_subprocess(
     tool_call_counter = 0
     thinking_started = False
     thinking_closed = False
-    research_phase = True  # True until we hit the answer
+    all_sources: List[Dict] = []
+    pending_thinking = ""  # Accumulate thinking to clean before sending
+
+    # Tool call ID mapping for tool outputs
+    tool_call_ids: Dict[str, str] = {}
 
     try:
         # Read stdout line by line
@@ -204,69 +310,127 @@ async def run_cli_subprocess(
             if line_text.startswith("[THINK]"):
                 think_content = unescape_line(line_text[7:].strip())
                 if think_content:
-                    # Open thinking block if not started
-                    if not thinking_started:
-                        yield create_sse_chunk("<think>\n", role="assistant")
-                        thinking_started = True
-                    # Stream thinking content inside the think block
-                    yield create_sse_chunk(f"{think_content}\n")
+                    # Clean the thinking content (remove <call_tool> XML tags)
+                    cleaned = clean_thinking_content(think_content)
+                    if cleaned:
+                        # Open thinking block if not started
+                        if not thinking_started:
+                            yield create_sse_chunk("<think>\n", role="assistant")
+                            thinking_started = True
+                        # Stream cleaned thinking content
+                        yield create_sse_chunk(f"{cleaned}\n")
 
             elif line_text.startswith("[TOOL_CALL]"):
                 # Parse: [TOOL_CALL] <name> | <id> | <args>
-                parts = line_text[11:].split(" | ", 2)
+                # Note: args may be empty, resulting in trailing " | "
+                raw_parts = line_text[11:].strip()
+                parts = raw_parts.split(" | ", 2)
                 tool_name = parts[0].strip() if len(parts) > 0 else "unknown"
                 call_id = (
                     parts[1].strip() if len(parts) > 1 else f"call_{tool_call_counter}"
                 )
-                args = unescape_line(parts[2]) if len(parts) > 2 else ""
+                # Clean call_id - remove any trailing pipe or whitespace
+                call_id = call_id.rstrip(" |")
+                args = (
+                    fix_html_entities(unescape_line(parts[2].strip()))
+                    if len(parts) > 2
+                    else ""
+                )
 
-                # Human-readable tool name for thinking
+                # Store call_id for matching tool outputs
+                tool_call_ids[call_id] = tool_name
+
+                # Human-readable tool name for display
                 tool_display = {
-                    "google_search": "Searching the web",
-                    "serper_search": "Searching the web",
-                    "exa_search": "Neural search",
-                    "semantic_scholar_snippet_search": "Searching papers",
-                    "jina_browse": "Reading webpage",
-                    "browse_url": "Reading webpage",
-                    "search_arabic_books": "Searching Arabic library",
-                }.get(tool_name, f"Using {tool_name}")
+                    "google_search": "Web Search",
+                    "serper_search": "Web Search",
+                    "exa_search": "Neural Search",
+                    "semantic_scholar_snippet_search": "Academic Search",
+                    "jina_browse": "Browse URL",
+                    "browse_url": "Browse URL",
+                    "search_arabic_books": "Arabic Library",
+                }.get(tool_name, tool_name.replace("_", " ").title())
 
-                # Add tool call to thinking block
+                # Ensure thinking block is open
                 if not thinking_started:
                     yield create_sse_chunk("<think>\n", role="assistant")
                     thinking_started = True
 
-                # Show tool usage in thinking
-                query_preview = args[:100] + "..." if len(args) > 100 else args
-                yield create_sse_chunk(f"[{tool_display}: {query_preview}]\n")
+                # Show tool usage in thinking with cleaner format
+                query_preview = args[:80] + "..." if len(args) > 80 else args
+                yield create_sse_chunk(f"\n**{tool_display}**: {query_preview}\n")
+
+                # Send proper tool_calls delta for UI card
+                tool_calls = [
+                    {
+                        "index": tool_call_counter,
+                        "id": call_id,
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            "arguments": json.dumps({"query": args}) if args else "{}",
+                        },
+                    }
+                ]
+                yield create_sse_chunk(tool_calls=tool_calls)
 
                 tool_call_counter += 1
 
             elif line_text.startswith("[TOOL_OUTPUT]"):
                 # Parse: [TOOL_OUTPUT] <id> | <output>
                 parts = line_text[13:].split(" | ", 1)
-                output = unescape_line(parts[1]) if len(parts) > 1 else ""
+                call_id = (
+                    parts[0].strip()
+                    if len(parts) > 0
+                    else f"call_{tool_call_counter - 1}"
+                )
+                output = (
+                    fix_html_entities(unescape_line(parts[1])) if len(parts) > 1 else ""
+                )
 
-                # Add brief summary to thinking
-                if output and thinking_started:
-                    # Very brief preview
-                    preview = output[:150].replace("\n", " ")
-                    if len(output) > 150:
-                        preview += "..."
-                    yield create_sse_chunk(f"  → Found relevant information\n")
+                if output:
+                    # Extract sources from tool output
+                    sources = extract_sources_from_output(output)
+                    if sources:
+                        all_sources.extend(sources)
+
+                    # Send tool output message with sources
+                    yield create_tool_output_chunk(
+                        tool_call_id=call_id,
+                        content=output[:1000],  # Truncate for display
+                        sources=sources if sources else None,
+                    )
+
+                    # Add brief note in thinking
+                    if thinking_started:
+                        source_count = len(sources)
+                        if source_count > 0:
+                            yield create_sse_chunk(
+                                f"  → Found {source_count} source(s)\n"
+                            )
+                        else:
+                            yield create_sse_chunk(f"  → Retrieved information\n")
 
             elif line_text.startswith("[ANSWER]"):
                 # Close thinking block before answer
                 if thinking_started and not thinking_closed:
                     yield create_sse_chunk("</think>\n\n")
                     thinking_closed = True
-                    research_phase = False
 
                 # Answer chunk - stream it directly as clean content
-                answer_chunk = unescape_line(line_text[8:].strip())
+                answer_chunk = fix_html_entities(unescape_line(line_text[8:].strip()))
+
+                # Clean any remaining XML tool tags from the answer
+                answer_chunk = clean_thinking_content(answer_chunk)
+
                 if answer_chunk:
                     current_answer += answer_chunk
-                    yield create_sse_chunk(answer_chunk)
+
+                    # Send answer with accumulated sources on first chunk
+                    if len(current_answer) == len(answer_chunk) and all_sources:
+                        yield create_sse_chunk(answer_chunk, sources=all_sources)
+                    else:
+                        yield create_sse_chunk(answer_chunk)
 
             elif line_text.startswith("[DONE]"):
                 # Completion
@@ -278,7 +442,7 @@ async def run_cli_subprocess(
                     yield create_sse_chunk("</think>\n\n")
                     thinking_closed = True
 
-                error_msg = unescape_line(line_text[7:].strip())
+                error_msg = fix_html_entities(unescape_line(line_text[7:].strip()))
                 yield create_sse_chunk(f"\n\n**Error:** {error_msg}\n")
 
             else:
