@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  dr-tulu-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    container_name: dr-tulu-gateway
+    ports:
+      - "3002:3002"
+    env_file:
+      - ./DR-Tulu/agent/.env
+    volumes:
+      # Mount the agent code for live updates
+      - ./DR-Tulu/agent:/app/DR-Tulu/agent:ro
+    restart: unless-stopped
+    networks:
+      - webui-network
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    ports:
+      - "3005:8080"
+    environment:
+      - OPENAI_API_BASE_URLS=http://host.docker.internal:3002/v1
+      - OPENAI_API_KEYS=dummy-key
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - open-webui-data:/app/backend/data
+    depends_on:
+      - dr-tulu-gateway
+    restart: unless-stopped
+    networks:
+      - webui-network
+
+networks:
+  webui-network:
+    driver: bridge
+
+volumes:
+  open-webui-data:

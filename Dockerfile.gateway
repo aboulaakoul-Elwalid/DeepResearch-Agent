@@ -1,0 +1,35 @@
+# Dockerfile for DR-Tulu CLI Gateway
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy gateway script
+COPY dr_tulu_cli_gateway.py /app/
+
+# Copy agent code
+COPY DR-Tulu/agent /app/DR-Tulu/agent
+
+# Install agent dependencies
+WORKDIR /app/DR-Tulu/agent
+RUN pip install --no-cache-dir -e .
+
+# Install gateway dependencies
+RUN pip install --no-cache-dir fastapi uvicorn
+
+WORKDIR /app
+
+# Expose port
+EXPOSE 3002
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:3002/health || exit 1
+
+# Run gateway
+CMD ["python", "dr_tulu_cli_gateway.py"]
