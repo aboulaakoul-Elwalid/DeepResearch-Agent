@@ -535,14 +535,30 @@ async def chat_completions(request: Request):
 
 if __name__ == "__main__":
     import uvicorn
+    import sys
 
-    print("=" * 60)
-    print("DR-Tulu CLI Gateway v0.4.0")
-    print("=" * 60)
-    print(f"CLI Script: {CLI_SCRIPT}")
-    print(f"Available models: {list(MODEL_CONFIGS.keys())}")
-    print(f"Python: {CLI_PYTHON if CLI_PYTHON.exists() else sys.executable}")
-    print("=" * 60)
+    # Parallax banner with ./ logo and DR
+    purple = "\033[38;5;141m"
+    gray = "\033[38;5;244m"
+    reset = "\033[0m"
+
+    banner = f"""{purple}
+                    ██╗     ██████╗  █████╗ ██████╗  █████╗ ██╗     ██╗      █████╗ ██╗  ██╗    ██████╗ ██████╗ 
+                   ██╔╝     ██╔══██╗██╔══██╗██╔══██╗██╔══██╗██║     ██║     ██╔══██╗╚██╗██╔╝    ██╔══██╗██╔══██╗
+                  ██╔╝      ██████╔╝███████║██████╔╝███████║██║     ██║     ███████║ ╚███╔╝     ██║  ██║██████╔╝
+                 ██╔╝       ██╔═══╝ ██╔══██║██╔══██╗██╔══██║██║     ██║     ██╔══██║ ██╔██╗     ██║  ██║██╔══██╗
+                ██╔╝        ██║     ██║  ██║██║  ██║██║  ██║███████╗███████╗██║  ██║██╔╝ ██╗    ██████╔╝██║  ██║
+         ██╗   ██╔╝         ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝    ╚═════╝ ╚═╝  ╚═╝
+         ╚═╝   ╚═╝
+{reset}
+                             {gray}D E E P   R E S E A R C H{reset}
+"""
+    print(banner, flush=True)
+    print(f"{gray}  Models:{reset} {', '.join(MODEL_CONFIGS.keys())}", flush=True)
+    print(f"{gray}  Gateway:{reset} http://localhost:3002/v1", flush=True)
+    print(f"{gray}  Status:{reset} Ready for queries", flush=True)
+    print(flush=True)
+    sys.stdout.flush()
 
     uvicorn.run(
         "dr_tulu_cli_gateway:app",

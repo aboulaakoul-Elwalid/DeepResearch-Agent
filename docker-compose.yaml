@@ -23,12 +23,20 @@ services:
     ports:
       - "3005:8080"
     environment:
+      - WEBUI_NAME=Parallax
       - OPENAI_API_BASE_URLS=http://host.docker.internal:3002/v1
       - OPENAI_API_KEYS=dummy-key
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - open-webui-data:/app/backend/data
+      # Custom Parallax branding (override built assets)
+      - ./custom-assets/favicon.png:/app/build/static/favicon.png:ro
+      - ./custom-assets/favicon.ico:/app/build/static/favicon.ico:ro
+      - ./custom-assets/favicon-96x96.png:/app/build/static/favicon-96x96.png:ro
+      - ./custom-assets/favicon-dark.png:/app/build/static/favicon-dark.png:ro
+      - ./custom-assets/favicon.svg:/app/build/static/favicon.svg:ro
+      - ./custom-assets/logo.png:/app/build/static/logo.png:ro
     depends_on:
       - dr-tulu-gateway
     restart: unless-stopped
