@@ -1,67 +1,58 @@
-# Python virtual environment
+# Environment and secrets
+.env
+DR-Tulu/agent/.env
+deploy/.env
+
+# Python
 .venv/
 venv/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.ruff_cache/
 
-# Jupyter/IPython
-.ipynb_checkpoints/
-
-# VSCode and IDE settings
+# IDE
 .vscode/
 .idea/
 *.swp
+.claude/
 
-# OS/Editor temp files
-*.bak
-*.tmp
-*.log
+# OS
 *.DS_Store
 Thumbs.db
 
-# Output data and artifacts
-output/assembled_books/
-output/clean_books/
-output/chunks/
-output/embeddings/
-output/tmp/
-output/stats/
-output/manifest/
-output/metadata/
-output/selected_books.csv
-output/assembled_books_index.csv
+# Logs
+*.log
+gateway.log
+server.log
 
-# Parquet and large data files
+# Data and cache
 *.parquet
+*.sqlite3
+chroma_db/
+tmp_chroma/
+output/
 
-# Model weights and cache
+# Model weights
 *.safetensors
 *.pt
 *.pth
 .cache/
 datasets/
 
-# Ignore DR-Tulu subproject outputs if any
-DR-Tulu/output/
-DR-Tulu/.venv/
-DR-Tulu/__pycache__/
+# Temp files
+*.bak
+*.tmp
+*.backup
 
-# Ignore deployment artifacts
-deploy/.env
-deploy/.DS_Store
-
-# Ignore CSVs and lists that are regenerated
-list-of-book-titles.csv
-
-# Ignore lock files
+# Lock files
 *.lock
 
-# Ignore shell history
-*.sh_history
+# Jupyter
+.ipynb_checkpoints/
 
-# End of file
-chroma_db/
-
-DR-Tulu/agent/.env
+# DR-Tulu subproject
+DR-Tulu/agent/.venv/
+DR-Tulu/agent/__pycache__/
+DR-Tulu/agent/.cache*/

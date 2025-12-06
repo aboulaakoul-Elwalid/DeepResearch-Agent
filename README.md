@@ -161,7 +161,7 @@ Create a JSONL file with your document chunks:
 #### Step 2: Generate Embeddings
 
 ```bash
-python embed_chunks.py \
+python rag/embed_chunks.py \
     --chunks-file your_chunks.jsonl \
     --parquet-file output/embeddings.parquet \
     --model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
@@ -170,7 +170,7 @@ python embed_chunks.py \
 #### Step 3: Ingest into ChromaDB
 
 ```bash
-python ingest_chroma.py \
+python rag/ingest_chroma.py \
     --parquet-file output/embeddings.parquet \
     --chroma-path ./chroma_db \
     --collection-name your_collection
@@ -261,16 +261,32 @@ To display the Qwen logo next to dr-tulu models:
 ```
 parallax_project/
 ├── dr_tulu_cli_gateway.py    # Main gateway server
-├── DR-Tulu/agent/            # Agent code
-│   ├── dr_agent/             # Core agent modules
-│   │   ├── mcp_backend/      # MCP tool implementations
-│   │   └── shared_prompts/   # Workflow prompts
-│   ├── scripts/              # CLI scripts
-│   └── workflows/            # Workflow configurations
-├── parallax/                 # Parallax inference engine
 ├── docker-compose.yaml       # Container orchestration
+├── Dockerfile.gateway        # Gateway container
 ├── Makefile                  # Build commands
-└── scripts/setup.sh          # Setup script
+├── README.md                 # This file
+│
+├── custom-assets/            # Parallax branding (favicon, logo, icons)
+├── scripts/                  # Setup scripts
+│   └── setup.sh
+│
+├── DR-Tulu/                  # Agent code
+│   └── agent/
+│       ├── dr_agent/         # Core agent modules
+│       ├── scripts/          # CLI scripts
+│       └── workflows/        # Workflow configurations
+│
+├── parallax/                 # Parallax inference engine
+│
+├── rag/                      # RAG pipeline scripts
+│   ├── embed_chunks.py       # Generate embeddings
+│   ├── ingest_chroma.py      # Ingest into ChromaDB
+│   └── ...
+│
+├── docs/                     # Documentation
+│   └── notes/                # Development notes
+│
+└── deploy/                   # Deployment scripts
 ```
 
 ### Running Manually
