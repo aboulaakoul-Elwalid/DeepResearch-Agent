@@ -56,7 +56,7 @@ Edit `.env` and set your Parallax endpoint:
 # Option A: Local Parallax (if you have a GPU)
 PARALLAX_BASE_URL=http://localhost:3001/v1
 
-# Option B: Hosted Modal endpoint (GPU-poor friendly)
+# Option B: Hosted Modal endpoint 
 PARALLAX_BASE_URL=https://aboulaakoul-elwalid--deep-scholar-parallax-run-parallax.modal.run/v1
 ```
 
