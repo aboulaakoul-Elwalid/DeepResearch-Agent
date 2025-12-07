@@ -57,6 +57,7 @@ PARALLAX_BASE_URL=http://localhost:3001/v1
 
 # Option B: Hosted Modal endpoint you can deploy it via
 # the deploy/modal_deploy.py script (no GPU needed)
+# follow with modal deployment instructions. then set:
 PARALLAX_BASE_URL=https://<user_name>-deep-scholar-parallax-run-parallax.modal.run/v1
 ```
 
