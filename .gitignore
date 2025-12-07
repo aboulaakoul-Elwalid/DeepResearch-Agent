@@ -33,6 +33,10 @@ server.log
 chroma_db/
 tmp_chroma/
 output/
+# But keep sample data for MCP tool
+!output/qa/
+!output/qa/chroma_ready_samples.jsonl
+!output/qa/chroma_spot_check_summary.json
 
 # Model weights
 *.safetensors
