@@ -30,13 +30,22 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - open-webui-data:/app/backend/data
-      # Custom Parallax branding (override built assets)
+      # Custom Parallax branding (override frontend build assets)
       - ./custom-assets/favicon.png:/app/build/static/favicon.png:ro
       - ./custom-assets/favicon.ico:/app/build/static/favicon.ico:ro
       - ./custom-assets/favicon-96x96.png:/app/build/static/favicon-96x96.png:ro
       - ./custom-assets/favicon-dark.png:/app/build/static/favicon-dark.png:ro
       - ./custom-assets/favicon.svg:/app/build/static/favicon.svg:ro
       - ./custom-assets/logo.png:/app/build/static/logo.png:ro
+      - ./custom-assets/logo.svg:/app/build/static/logo.svg:ro
+      # Custom Parallax branding (override backend static assets)
+      - ./custom-assets/favicon.png:/app/backend/open_webui/static/favicon.png:ro
+      - ./custom-assets/favicon.ico:/app/backend/open_webui/static/favicon.ico:ro
+      - ./custom-assets/favicon-96x96.png:/app/backend/open_webui/static/favicon-96x96.png:ro
+      - ./custom-assets/favicon-dark.png:/app/backend/open_webui/static/favicon-dark.png:ro
+      - ./custom-assets/favicon.svg:/app/backend/open_webui/static/favicon.svg:ro
+      - ./custom-assets/logo.png:/app/backend/open_webui/static/logo.png:ro
+      - ./custom-assets/logo.svg:/app/backend/open_webui/static/logo.svg:ro
     depends_on:
       - dr-tulu-gateway
     restart: unless-stopped

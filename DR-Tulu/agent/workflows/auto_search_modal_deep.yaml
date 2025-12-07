@@ -15,7 +15,7 @@ search_agent_api_key: "sk-no-key-required"  # Dummy key for litellm
 search_agent_max_tokens: 8000  # More tokens for longer reasoning
 search_agent_temperature: 0.5  # Lower temp for more focused research
 search_agent_max_tool_calls: 15  # Allow more tool calls for deep research
-search_agent_min_tool_calls: 1  # REDUCED: Accept answer after 1 good tool call (was 3)
+search_agent_min_tool_calls: 3  # Force at least 3 tool calls for deep research
 
 # Force long_form output by default
 default_dataset_name: "long_form"
