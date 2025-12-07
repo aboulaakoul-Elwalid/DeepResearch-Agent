@@ -42,7 +42,7 @@ Parallax Deep Research Agent (DR-Tulu) is an agentic research assistant that per
 
 ```bash
 git clone https://github.com/aboulaakoul-elwalid/DeepResearch-Agent.git
-cd parallax-dr-tulu
+cd DeepResearch-Agent
 # Run setup
 make setup
 ```
