@@ -1,7 +1,9 @@
 # Parallax Deep Research Agent - Makefile
 # ========================================
 
-.PHONY: setup install run-gateway run-webui run-all stop status clean help
+SHELL := /bin/bash
+
+.PHONY: setup install run cli start-webui run-gateway run-webui run-all stop status clean help
 
 # Configuration
 PYTHON := python3
@@ -84,6 +86,58 @@ create-env:
 # ============================================================================
 # Running Services
 # ============================================================================
+
+# Main entry point - starts WebUI (if docker available) and gateway
+run: start-webui
+	@echo ""
+	@echo "  ╔════════════════════════════════════════════════╗"
+	@echo "  ║       Parallax Deep Research Agent             ║"
+	@echo "  ╠════════════════════════════════════════════════╣"
+	@echo "  ║                                                ║"
+	@echo "  ║  WebUI:  http://localhost:$(WEBUI_PORT)               ║"
+	@echo "  ║  CLI:    make cli                              ║"
+	@echo "  ║                                                ║"
+	@echo "  ╚════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "  Starting gateway... (Ctrl+C to stop)"
+	@echo ""
+	@cd $(CURDIR) && \
+		source $(VENV)/bin/activate && \
+		export PYTHONPATH="$(CURDIR)/DR-Tulu/agent:$$PYTHONPATH" && \
+		set -a && source DR-Tulu/agent/.env 2>/dev/null; set +a && \
+		$(PYTHON) dr_tulu_cli_gateway.py
+
+# Auto-start WebUI container if docker is available
+start-webui:
+	@if command -v docker >/dev/null 2>&1; then \
+		if docker ps --filter "name=open-webui" --format "{{.Names}}" | grep -q open-webui; then \
+			echo "  WebUI already running"; \
+		else \
+			echo "  Starting WebUI container..."; \
+			docker start open-webui 2>/dev/null || \
+			docker run -d \
+				--name open-webui \
+				-p $(WEBUI_PORT):8080 \
+				--add-host=host.docker.internal:host-gateway \
+				-v open-webui-data:/app/backend/data \
+				-e WEBUI_NAME="Parallax Deep Research" \
+				-e OPENAI_API_BASE_URLS=http://host.docker.internal:$(GATEWAY_PORT)/v1 \
+				-e OPENAI_API_KEYS=dummy-key \
+				-e ENABLE_SIGNUP=true \
+				--restart unless-stopped \
+				ghcr.io/open-webui/open-webui:main >/dev/null 2>&1; \
+			echo "  WebUI started"; \
+		fi \
+	fi
+
+# Interactive CLI for deep research
+cli:
+	@cd $(CURDIR) && \
+		source $(VENV)/bin/activate && \
+		export PYTHONPATH="$(CURDIR)/DR-Tulu/agent:$$PYTHONPATH" && \
+		set -a && source DR-Tulu/agent/.env 2>/dev/null; set +a && \
+		$(PYTHON) DR-Tulu/agent/scripts/interactive_auto_search.py \
+			--config DR-Tulu/agent/workflows/auto_search_modal_deep.yaml
 
 run-gateway:
 	@echo "Starting CLI Gateway on port $(GATEWAY_PORT)..."
