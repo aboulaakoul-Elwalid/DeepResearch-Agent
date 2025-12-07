@@ -1,19 +1,19 @@
 # Parallax Deep Research Agent
 
 <p align="center">
-  <img src="parallax/src/frontend/src/assets/gradient-icon.svg" alt="Parallax" width="60" height="60">
+<img src="parallax/src/frontend/src/assets/gradient-icon.svg" alt="Parallax" width="60" height="60">
 </p>
 
 <p align="center">
-  <strong>A deep research agent powered by Parallax distributed inference</strong>
+<strong>A deep research agent powered by Parallax distributed inference</strong>
 </p>
 
 <p align="center">
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#features">Features</a> •
-  <a href="#architecture">Architecture</a> •
-  <a href="#rag-setup">RAG Setup</a> •
-  <a href="#configuration">Configuration</a>
+<a href="#quick-start">Quick Start</a> •
+<a href="#features">Features</a> •
+<a href="#architecture">Architecture</a> •
+<a href="#rag-setup">RAG Setup</a> •
+<a href="#configuration">Configuration</a>
 </p>
 
 ---
@@ -55,8 +55,9 @@ Edit `.env` and set your Parallax endpoint:
 # Option A: Local Parallax (if you have a GPU)
 PARALLAX_BASE_URL=http://localhost:3001/v1
 
-# Option B: Hosted Modal endpoint
-PARALLAX_BASE_URL=https://aboulaakoul-elwalid--deep-scholar-parallax-run-parallax.modal.run/v1
+# Option B: Hosted Modal endpoint you can deploy it via
+# the deploy/modal_deploy.py script (no GPU needed)
+PARALLAX_BASE_URL=https://<user_name>-deep-scholar-parallax-run-parallax.modal.run/v1
 ```
 
 ### 3. Start Services
@@ -107,25 +108,25 @@ Search private document collections using the MCP tool interface. Pre-configured
 │                    Open WebUI (localhost:3005)                  │
 │              User selects "dr-tulu" model                       │
 └─────────────────────────────────────────────────────────────────┘
-                              │
-                              │ POST /v1/chat/completions
-                              ▼
+                            │
+                            │ POST /v1/chat/completions
+                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │              CLI Gateway (localhost:3002)                       │
 │         dr_tulu_cli_gateway.py                                  │
 │   - Converts CLI output to OpenAI SSE format                    │
 │   - Parses <think>, <call_tool>, <answer> tags                  │
 └─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
+                            │
+                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │              DR-Tulu Agent (subprocess)                         │
 │         interactive_auto_search.py                              │
 │   - ReAct loop with MCP tools                                   │
 │   - Web search, browse, RAG tools                               │
 └─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
+                            │
+                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │              Parallax Inference                                 │
 │   - Local: http://localhost:3001/v1                             │
@@ -162,18 +163,18 @@ Create a JSONL file with your document chunks:
 
 ```bash
 python rag/embed_chunks.py \
-    --chunks-file your_chunks.jsonl \
-    --parquet-file output/embeddings.parquet \
-    --model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+  --chunks-file your_chunks.jsonl \
+  --parquet-file output/embeddings.parquet \
+  --model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
 ```
 
 #### Step 3: Ingest into ChromaDB
 
 ```bash
 python rag/ingest_chroma.py \
-    --parquet-file output/embeddings.parquet \
-    --chroma-path ./chroma_db \
-    --collection-name your_collection
+  --parquet-file output/embeddings.parquet \
+  --chroma-path ./chroma_db \
+  --collection-name your_collection
 ```
 
 #### Step 4: Configure the Tool
@@ -301,12 +302,12 @@ python dr_tulu_cli_gateway.py
 
 # In another terminal, start Open WebUI
 docker run -d \
-  --name open-webui \
-  -p 3005:8080 \
-  -e OPENAI_API_BASE_URLS=http://host.docker.internal:3002/v1 \
-  -e OPENAI_API_KEYS=dummy-key \
-  --add-host=host.docker.internal:host-gateway \
-  ghcr.io/open-webui/open-webui:main
+--name open-webui \
+-p 3005:8080 \
+-e OPENAI_API_BASE_URLS=http://host.docker.internal:3002/v1 \
+-e OPENAI_API_KEYS=dummy-key \
+--add-host=host.docker.internal:host-gateway \
+ghcr.io/open-webui/open-webui:main
 ```
 
 ### Testing
@@ -317,8 +318,8 @@ curl http://localhost:3002/v1/models
 
 # Test a completion
 curl -X POST http://localhost:3002/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model": "dr-tulu-quick", "messages": [{"role": "user", "content": "What is machine learning?"}], "stream": true}'
+-H "Content-Type: application/json" \
+-d '{"model": "dr-tulu-quick", "messages": [{"role": "user", "content": "What is machine learning?"}], "stream": true}'
 ```
 
 ---
