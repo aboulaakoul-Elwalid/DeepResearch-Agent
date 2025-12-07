@@ -23,6 +23,7 @@
 Parallax Deep Research Agent (DR-Tulu) is an agentic research assistant that performs multi-step web research with visible tool execution. It runs inside **Open WebUI** and uses **Parallax** for local or distributed LLM inference.
 
 **Key Capabilities:**
+
 - Multi-step deep research with 5-15 tool calls
 - Visible tool execution (search, browse, synthesize)
 - Citations with source links
@@ -40,7 +41,7 @@ Parallax Deep Research Agent (DR-Tulu) is an agentic research assistant that per
 ### 1. Clone and Setup
 
 ```bash
-git clone https://github.com/anthropics/parallax-dr-tulu.git
+git clone https://github.com/aboulaakoul-elwalid/parallax-dr-tulu.git
 cd parallax-dr-tulu
 
 # Run setup
@@ -78,11 +79,11 @@ Select **dr-tulu** or **dr-tulu-quick** as your model and start researching!
 
 ### Research Modes
 
-| Model | Description | Tool Calls | Best For |
-|-------|-------------|------------|----------|
-| `dr-tulu` | Deep research mode | 5-15 | Complex questions, comprehensive research |
-| `dr-tulu-quick` | Quick research mode | 1-5 | Simple questions, fast answers |
-| `dr-tulu-deep` | Alias for dr-tulu | 5-15 | Same as dr-tulu |
+| Model           | Description         | Tool Calls | Best For                                  |
+| --------------- | ------------------- | ---------- | ----------------------------------------- |
+| `dr-tulu`       | Deep research mode  | 5-15       | Complex questions, comprehensive research |
+| `dr-tulu-quick` | Quick research mode | 1-5        | Simple questions, fast answers            |
+| `dr-tulu-deep`  | Alias for dr-tulu   | 5-15       | Same as dr-tulu                           |
 
 ### Visible Tool Execution
 
@@ -222,9 +223,9 @@ ARABIC_BOOKS_COLLECTION=arabic_books
 
 Research behavior is controlled by YAML workflow configs in `DR-Tulu/agent/workflows/`:
 
-| Config | Description |
-|--------|-------------|
-| `auto_search_modal.yaml` | Quick mode - fewer iterations |
+| Config                        | Description                        |
+| ----------------------------- | ---------------------------------- |
+| `auto_search_modal.yaml`      | Quick mode - fewer iterations      |
 | `auto_search_modal_deep.yaml` | Deep mode - comprehensive research |
 
 ### Open WebUI Settings
@@ -236,6 +237,7 @@ The gateway exposes models at `http://localhost:3002/v1`. Open WebUI connects to
 The Parallax "/" logo and favicon are automatically applied via volume mounts in `docker-compose.yaml`. The app name is pre-configured as "Parallax Deep Research".
 
 **Custom assets location:** `custom-assets/`
+
 - `favicon.png` - Browser tab icon (Parallax "/" logo)
 - `logo.png` - Sidebar logo
 - `qwen.png` - Qwen model icon for dr-tulu models
