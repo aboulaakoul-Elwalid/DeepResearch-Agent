@@ -43,7 +43,6 @@ Parallax Deep Research Agent (DR-Tulu) is an agentic research assistant that per
 ```bash
 git clone https://github.com/aboulaakoul-elwalid/DeepResearch-Agent.git
 cd parallax-dr-tulu
-
 # Run setup
 make setup
 ```
@@ -56,7 +55,7 @@ Edit `.env` and set your Parallax endpoint:
 # Option A: Local Parallax (if you have a GPU)
 PARALLAX_BASE_URL=http://localhost:3001/v1
 
-# Option B: Hosted Modal endpoint 
+# Option B: Hosted Modal endpoint
 PARALLAX_BASE_URL=https://aboulaakoul-elwalid--deep-scholar-parallax-run-parallax.modal.run/v1
 ```
 
