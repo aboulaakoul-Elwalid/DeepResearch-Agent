@@ -1,0 +1,9 @@
+model_list:
+  - model_name: gemini/gemini-2.5-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      # api_key will be read from GOOGLE_API_KEY or GOOGLE_AI_API_KEY in env
+
+general_settings:
+  drop_params: true
+  telemetry: false

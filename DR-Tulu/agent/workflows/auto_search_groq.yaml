@@ -1,0 +1,47 @@
+tool_parser: "v20250824"
+search_provider: "serper"
+
+# Using Groq's fast Llama-3 for research
+# Fallback while Gemini quota is exhausted
+search_agent_base_url: ""  # Let litellm handle routing via groq/ prefix
+search_agent_model_name: "groq/llama-3.3-70b-versatile"
+search_agent_tokenizer_name: null
+search_agent_api_key: ""  # Uses GROQ_API_KEY env var
+
+search_agent_max_tokens: 4096
+search_agent_temperature: 0.3
+search_agent_max_tool_calls: 10
+search_agent_min_tool_calls: 2  # Minimum tool calls before answering
+
+default_dataset_name: "long_form"
+prompt_path: "unified_tool_calling_cli.yaml"
+
+# Browse agent - use same Groq endpoint
+use_browse_agent: true
+browse_agent_base_url: ""  # Let litellm handle routing via groq/ prefix
+browse_agent_model_name: "groq/llama-3.3-70b-versatile"
+browse_agent_tokenizer_name: null
+browse_agent_api_key: ""
+browse_agent_max_tokens: 2048
+browse_agent_temperature: 0.2
+
+# Search tool configuration
+number_documents_to_search: 5
+search_timeout: 120
+
+# Exa search
+use_exa_search: true
+exa_num_results: 5
+exa_include_domains:
+exa_exclude_domains:
+exa_use_autoprompt: true
+exa_search_type: "neural"
+
+# Arabic library disabled for now (simpler test)
+use_arabic_library: false
+
+# Browse tool configuration
+browse_tool_name: "jina"
+browse_timeout: 60
+browse_max_pages_to_fetch: 3
+browse_context_char_length: 4000

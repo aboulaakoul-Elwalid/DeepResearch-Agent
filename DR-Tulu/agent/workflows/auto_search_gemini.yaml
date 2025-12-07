@@ -1,0 +1,65 @@
+tool_parser: "v20250824"
+search_provider: "serper"  # Use Google via Serper API (returns snippets)
+
+# Using Google Gemini 2.5 Flash API
+# Advantages:
+#   - 1M token context window (can handle very long research)
+#   - Excellent reasoning for research synthesis
+#   - Better quality than 2.0 Flash
+#   - OpenAI-compatible via litellm
+#
+# Note: 2.5 Flash has lower rate limits (10 req/min) so we use retry logic
+# Set GOOGLE_AI_API_KEY environment variable with your API key
+# Get free key at: https://ai.google.dev/
+
+# Search agent configuration (primary research agent)
+# FIX: Use "gemini/" prefix to correctly route to Google GenAI provider in litellm
+# NOTE: API key is read automatically from GOOGLE_AI_API_KEY environment variable by litellm
+search_agent_base_url: ""
+search_agent_model_name: "gemini/gemini-2.5-flash"  # Gemini 2.5 Flash - better quality
+search_agent_tokenizer_name: "Qwen/Qwen3-8B"  # For tokenization approximation
+search_agent_api_key: "dummy-key"  # litellm reads GOOGLE_AI_API_KEY from environment automatically
+search_agent_max_tokens: 8000
+search_agent_temperature: 0.7  # Lower for more focused research
+search_agent_max_tool_calls: 15  # Allow more tool calls for deep research
+
+# Browse agent configuration (for reading full articles/papers)
+# Enabled - uses Jina for web page reading
+use_browse_agent: true
+browse_agent_base_url: ""
+browse_agent_model_name: "gemini/gemini-2.5-flash"
+browse_agent_tokenizer_name: "Qwen/Qwen3-8B"
+browse_agent_api_key: "dummy-key"  # litellm reads GOOGLE_AI_API_KEY from environment automatically
+browse_agent_max_tokens: 8000
+browse_agent_temperature: 0.3  # Lower for more consistent summaries
+
+# Search tool configuration
+number_documents_to_search: 10
+search_timeout: 180
+
+# Exa search - enabled for better paper search
+use_exa_search: true
+exa_num_results: 6
+exa_include_domains:
+exa_exclude_domains:
+exa_use_autoprompt: true
+exa_search_type: "neural"
+
+# Exa Websets (optional curated sets)
+use_exa_websets: false
+exa_webset_id:
+exa_websets_num_results: 5
+exa_websets_include_domains:
+exa_websets_exclude_domains:
+
+# Arabic library MCP tool
+use_arabic_library: true
+arabic_library_num_results: 5
+arabic_library_chroma_path: "/home/elwalid/projects/parallax_project/chroma_db"
+arabic_library_collection: "arabic_books"
+
+# Browse tool configuration
+browse_tool_name: "jina"  # Jina for reading web pages
+browse_timeout: 180
+browse_max_pages_to_fetch: 10
+browse_context_char_length: 6000

@@ -1,0 +1,49 @@
+tool_parser: "v20250824"
+
+# Parallax (Modal) OpenAI-compatible endpoint
+search_agent_base_url: "https://aboulaakoul-elwalid--deep-scholar-parallax-run-parallax.modal.run/v1"
+search_agent_model_name: "Qwen/Qwen2.5-0.5B-Instruct"
+search_agent_tokenizer_name: null  # Not needed for commercial API mode
+search_agent_api_key: "not-needed"  # Parallax endpoint does not require auth
+search_agent_provider: "openai"
+search_agent_max_tokens: 2048
+search_agent_temperature: 0.7
+search_agent_max_tool_calls: 10
+
+search_agent_fallback_enabled: true
+search_agent_fallback_base_url: ""
+search_agent_fallback_model_name: "gemini/gemini-2.0-flash"
+search_agent_fallback_tokenizer_name: "Qwen/Qwen3-8B"
+search_agent_fallback_api_key: "dummy-key"
+search_agent_fallback_provider: null
+
+# Browse agent config (disabled by default)
+use_browse_agent: false
+browse_agent_base_url: "https://aboulaakoul-elwalid--deep-scholar-parallax-run-parallax.modal.run/v1"
+browse_agent_model_name: "Qwen/Qwen2.5-0.5B-Instruct"
+browse_agent_tokenizer_name: null
+browse_agent_api_key: "not-needed"
+browse_agent_max_tokens: 2048
+browse_agent_temperature: 0.3
+
+# Search tool configuration
+number_documents_to_search: 10
+search_timeout: 180
+
+# Exa search (enable for targeted web search; requires EXA_API_KEY)
+use_exa_search: true
+exa_num_results: 8
+exa_include_domains: "arxiv.org"
+exa_exclude_domains:
+exa_use_autoprompt: true
+exa_search_type: "neural"
+
+# Browse tool configuration
+browse_tool_name: "jina"
+browse_timeout: 180
+browse_max_pages_to_fetch: 10
+browse_context_char_length: 6000
+
+# Arabic Chroma library (set ARABIC_BOOKS_CHROMA_PATH/ARABIC_BOOKS_COLLECTION env vars)
+use_arabic_library: true
+arabic_library_num_results: 5

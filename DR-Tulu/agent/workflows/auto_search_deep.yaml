@@ -1,0 +1,53 @@
+tool_parser: "v20250824"
+prompt_path: null  # Use default unified_tool_calling_cli.yaml for Gemini
+
+# Deep research mode: Use Gemini via Google API (no Modal)
+search_agent_base_url: ""   # Let client use provider + api key
+search_agent_model_name: "gemini/gemini-2.5-flash"
+search_agent_tokenizer_name: null
+search_agent_api_key: ""    # Will fall back to GOOGLE_API_KEY env
+search_agent_provider: null  # Let LiteLLM auto-detect from model name
+search_agent_max_tokens: 8192
+search_agent_temperature: 0.3
+search_agent_max_tool_calls: 12
+default_dataset_name: "long_form"   # use long-form prompt additions
+system_prompt_overrides:
+  long_form: |
+    You are a deep research assistant. Be concise and source-backed.
+    - Do not fixate on a single inaccessible source (e.g., a PDF that only returns a cover/abstract). If one source fails, pivot to other sources.
+    - Reuse and synthesize information already gathered from previous tool outputs before claiming data is missing.
+    - Avoid repeating the exact same query or browsing the same URL unless parameters (page/section) change.
+    - Prefer summarizing multiple found items over deferring with "limited overview."
+
+# Browse agent also uses Gemini
+use_browse_agent: true
+browse_agent_base_url: ""
+browse_agent_model_name: "gemini/gemini-2.5-flash"
+browse_agent_tokenizer_name: null
+browse_agent_api_key: ""    # Will fall back to GOOGLE_API_KEY env
+browse_agent_max_tokens: 4096
+browse_agent_temperature: 0.2
+
+# Search tool configuration
+number_documents_to_search: 5
+search_timeout: 300
+
+# Exa search tuned for broader coverage (requires EXA_API_KEY)
+use_exa_search: true
+exa_num_results: 5
+exa_include_domains:
+exa_exclude_domains:
+exa_use_autoprompt: true
+exa_search_type: "neural"
+
+# Browse tool configuration
+browse_tool_name: "jina"
+browse_timeout: 240
+browse_max_pages_to_fetch: 3
+browse_context_char_length: 8000
+
+# Arabic Chroma library (opt-in)
+use_arabic_library: true
+arabic_library_num_results: 5
+arabic_library_chroma_path: "/home/elwalid/projects/parallax_project/chroma_db"
+arabic_library_collection: "arabic_books"

@@ -1,0 +1,55 @@
+tool_parser: "v20250824"
+search_provider: "serper"  # Use Google via Serper API
+verbose: true  # Enable verbose logging for debugging
+
+# Using Local Parallax Inference
+# Endpoint: http://localhost:4000/v1
+
+search_agent_base_url: "http://localhost:4000/v1"
+search_agent_model_name: "openai/Qwen/Qwen2.5-7B-Instruct" 
+search_agent_tokenizer_name: "Qwen/Qwen2.5-7B-Instruct"
+search_agent_api_key: "sk-no-key-required"
+search_agent_provider: "openai"
+
+# DEEP RESEARCH: Increased limits for comprehensive research
+search_agent_max_tokens: 8000
+search_agent_temperature: 0.5
+search_agent_max_tool_calls: 15
+search_agent_min_tool_calls: 1
+
+# Force long_form output by default
+default_dataset_name: "long_form"
+
+# Use the stricter deep research prompt with mandatory tool call requirements
+prompt_path: "unified_tool_calling_deep.yaml"
+
+# Browse agent - use same Local endpoint
+use_browse_agent: true
+browse_agent_base_url: "http://localhost:4000/v1"
+browse_agent_model_name: "openai/Qwen/Qwen2.5-7B-Instruct"
+browse_agent_tokenizer_name: "Qwen/Qwen2.5-7B-Instruct"
+browse_agent_api_key: "sk-no-key-required"
+browse_agent_max_tokens: 4000
+browse_agent_temperature: 0.3
+
+# Search tool configuration
+number_documents_to_search: 15
+search_timeout: 300
+
+# Exa search
+use_exa_search: true
+exa_num_results: 10
+exa_use_autoprompt: true
+exa_search_type: "neural"
+
+# Arabic library MCP tool
+use_arabic_library: true
+arabic_library_num_results: 5
+arabic_library_chroma_path: "/home/elwalid/projects/parallax_project/chroma_db"
+arabic_library_collection: "arabic_books"
+
+# Browse tool configuration
+browse_tool_name: "jina"
+browse_timeout: 300
+browse_max_pages_to_fetch: 15
+browse_context_char_length: 8000
