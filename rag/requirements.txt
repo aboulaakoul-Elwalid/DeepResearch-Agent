@@ -1,0 +1,29 @@
+# RAG Pipeline Dependencies
+# Install with: pip install -r requirements.txt
+
+# Core data processing
+pandas>=2.0.0
+pyarrow>=14.0.0
+numpy>=1.24.0
+
+# HuggingFace datasets
+datasets>=2.14.0
+requests>=2.28.0
+
+# Embeddings
+sentence-transformers>=2.2.0
+torch>=2.0.0
+
+# Vector database
+chromadb>=0.4.0
+
+# Progress bars and CLI
+tqdm>=4.65.0
+
+# Optional: For faster parquet operations
+# fastparquet>=2023.4.0
+
+# Development dependencies (optional)
+# pytest>=7.0.0
+# black>=23.0.0
+# ruff>=0.0.280

@@ -114,7 +114,9 @@ def setup_directories():
         Path(d).mkdir(parents=True, exist_ok=True)
 
 
-def fetch_metadata_via_api(dataset_name: str = "MoMonir/Shamela_Books_info") -> pd.DataFrame:
+def fetch_metadata_via_api(
+    dataset_name: str = "MoMonir/Shamela_Books_info",
+) -> "pd.DataFrame":
     """
     Fetch metadata using HF's parquet files API.
     This is much faster than downloading the entire dataset.
@@ -155,14 +157,15 @@ def fetch_metadata_via_api(dataset_name: str = "MoMonir/Shamela_Books_info") -> 
         print(f"⚠️  API method failed: {e}")
         print("📥 Falling back to datasets library...")
 
-        from datasets import load_dataset
+    # Fallback to datasets library
+    from datasets import load_dataset
 
-        info_dataset = load_dataset(dataset_name)
-        df = pd.DataFrame(info_dataset["train"])
-        df.to_parquet(cache_file, index=False)
-        print(f"✓ Loaded {len(df)} metadata records")
+    info_dataset = load_dataset(dataset_name)
+    df = pd.DataFrame(info_dataset["train"])
+    df.to_parquet(cache_file, index=False)
+    print(f"✓ Loaded {len(df)} metadata records")
 
-        return df
+    return df
 
 
 def query_rows_api(
@@ -194,7 +197,12 @@ def search_api(dataset_name: str, query: str) -> Optional[Dict]:
     Search dataset using HF's search API (if available).
     """
     url = f"{HF_API_BASE}/search"
-    params = {"dataset": dataset_name, "config": "default", "split": "train", "query": query}
+    params = {
+        "dataset": dataset_name,
+        "config": "default",
+        "split": "train",
+        "query": query,
+    }
 
     try:
         response = requests.get(url, params=params, timeout=30)
@@ -269,4 +277,211 @@ def identify_books_from_metadata(
             print(f"    - {title}")
 
     # Save matched info
-    with
+    with open("output/metadata/matched_books.json", "w", encoding="utf-8") as f:
+        json.dump(matched_books, f, ensure_ascii=False, indent=2, default=str)
+
+    return matched_books
+
+
+def fetch_book_by_index(
+    dataset_name: str,
+    row_index: int,
+    batch_size: int = 100,
+) -> Optional[Dict]:
+    """
+    Fetch a specific book by its row index using the API.
+    Uses batch queries centered around the target index.
+    """
+    offset = max(0, row_index - (batch_size // 2))
+    result = query_rows_api(dataset_name, offset=offset, length=batch_size)
+
+    if not result or "rows" not in result:
+        return None
+
+    for row in result["rows"]:
+        if row.get("row_idx") == row_index:
+            return row.get("row", {})
+
+    # Try direct fetch if not in batch
+    direct = query_rows_api(dataset_name, offset=row_index, length=1)
+    if direct and "rows" in direct and len(direct["rows"]) > 0:
+        return direct["rows"][0].get("row", {})
+
+    return None
+
+
+def save_single_book(book_data: Dict, book_info: Dict, output_dir: Path) -> bool:
+    """
+    Save a single book's content and metadata.
+    """
+    book_id = book_info.get("index", "unknown")
+    title = book_info.get("title", "untitled")
+
+    # Create safe filename
+    safe_title = "".join(c if c.isalnum() or c in " -_" else "_" for c in str(title))
+    safe_title = safe_title[:50]  # Limit length
+
+    book_dir = output_dir / str(book_id)
+    book_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save content
+    content = book_data.get("text", "") or book_data.get("content", "")
+    if not content:
+        # Try to find any text field
+        for key, value in book_data.items():
+            if isinstance(value, str) and len(value) > 100:
+                content = value
+                break
+
+    if content:
+        content_file = book_dir / f"{book_id}_{safe_title}.txt"
+        content_file.write_text(content, encoding="utf-8")
+
+    # Save metadata
+    meta = {
+        "book_id": book_id,
+        "title": title,
+        "extracted_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        **book_info.get("metadata", {}),
+    }
+    meta_file = book_dir / "metadata.json"
+    with open(meta_file, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+
+    return bool(content)
+
+
+def extract_books_via_api(
+    dataset_name: str = "MoMonir/shamela_books",
+    matched_books: Optional[Dict] = None,
+    output_dir: Path = Path("output/books"),
+) -> Dict[str, bool]:
+    """
+    Extract matched books using the HuggingFace API.
+    """
+    print("\n" + "=" * 80)
+    print("STEP 3: Extracting Books via API")
+    print("=" * 80)
+
+    if matched_books is None:
+        matched_file = Path("output/metadata/matched_books.json")
+        if matched_file.exists():
+            with open(matched_file, "r", encoding="utf-8") as f:
+                matched_books = json.load(f)
+        else:
+            print("No matched books found. Run identification first.")
+            return {}
+
+    if not matched_books:
+        print("No matched books to extract.")
+        return {}
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    results: Dict[str, bool] = {}
+
+    for idx, info in tqdm(matched_books.items(), desc="Extracting books"):
+        row_index = int(idx)
+        title = info.get("title", "unknown")
+
+        # Check if already extracted
+        book_dir = output_dir / str(row_index)
+        if book_dir.exists() and any(book_dir.glob("*.txt")):
+            print(f"  Skipping {title} (already extracted)")
+            results[str(row_index)] = True
+            continue
+
+        # Fetch the book
+        book_data = fetch_book_by_index(dataset_name, row_index)
+
+        if book_data:
+            success = save_single_book(book_data, info, output_dir)
+            results[str(row_index)] = success
+            if success:
+                print(f"  Extracted: {title}")
+            else:
+                print(f"  No content: {title}")
+        else:
+            results[str(row_index)] = False
+            print(f"  Failed: {title}")
+
+        # Rate limiting
+        time.sleep(0.5)
+
+    # Summary
+    successful = sum(1 for v in results.values() if v)
+    print(f"\n Extraction complete: {successful}/{len(results)} books")
+
+    return results
+
+
+def create_master_csv(
+    matched_books: Dict,
+    results: Dict[str, bool],
+    output_path: Path = Path("output/metadata/extracted_books.csv"),
+) -> None:
+    """
+    Create a master CSV of extracted books for downstream processing.
+    """
+    rows = []
+    for idx, info in matched_books.items():
+        row = {
+            "book_id": idx,
+            "title": info.get("title", ""),
+            "extracted": results.get(str(idx), False),
+            "file_path": f"output/books/{idx}/" if results.get(str(idx)) else "",
+        }
+        # Add any metadata fields
+        if "metadata" in info:
+            for key, value in info["metadata"].items():
+                if key not in row:
+                    row[key] = value
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(output_path, index=False, encoding="utf-8")
+    print(f"\n Master CSV saved to {output_path}")
+
+
+def main():
+    """
+    Main entry point for the API-based extraction.
+    """
+    print("\n" + "=" * 80)
+    print("SHAMELA BOOK EXTRACTOR - API MODE")
+    print("=" * 80)
+
+    # Setup
+    setup_directories()
+
+    # Step 1: Fetch metadata
+    metadata_df = fetch_metadata_via_api()
+    print(f"\n Metadata loaded: {len(metadata_df)} records")
+    print(f"  Columns: {list(metadata_df.columns)}")
+
+    # Step 2: Identify target books
+    matched_books = identify_books_from_metadata(metadata_df, SELECTED_BOOKS)
+
+    if not matched_books:
+        print("\n No matching books found. Exiting.")
+        return
+
+    # Step 3: Extract books via API
+    results = extract_books_via_api(matched_books=matched_books)
+
+    # Step 4: Create master CSV
+    create_master_csv(matched_books, results)
+
+    print("\n" + "=" * 80)
+    print("EXTRACTION COMPLETE")
+    print("=" * 80)
+    print(f"  Books requested: {len(SELECTED_BOOKS)}")
+    print(f"  Books matched: {len(matched_books)}")
+    print(f"  Books extracted: {sum(1 for v in results.values() if v)}")
+    print("\nOutput directories:")
+    print("  - output/books/ - Extracted book content")
+    print("  - output/metadata/ - Metadata and CSV files")
+
+
+if __name__ == "__main__":
+    main()
