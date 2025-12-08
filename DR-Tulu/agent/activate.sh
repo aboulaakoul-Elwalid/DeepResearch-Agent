@@ -23,20 +23,20 @@ export ARABIC_BOOKS_COLLECTION="${ARABIC_BOOKS_COLLECTION:-arabic_books}"
 echo "✓ DR-Tulu environment activated"
 echo ""
 echo "Available commands:"
-echo "  chat_modal            - Interactive chat with Modal Qwen-7B (recommended)"
+echo "  chat_parallax         - Interactive chat with local Parallax (recommended)"
 echo "  launch_chat           - Run interactive demo"
 echo "  mcp_server            - Start MCP backend server"
 echo "  mcp_http              - Start MCP backend over HTTP (for Open WebUI External Tools)"
 echo "  auto_search           - Run auto-search workflow"
 echo ""
 echo "Quick start:"
-echo "  chat_modal            # Uses Modal GPU endpoint"
-echo "  python scripts/interactive_auto_search.py -c workflows/auto_search_modal_deep.yaml"
+echo "  chat_parallax         # Uses local Parallax endpoint"
+echo "  python scripts/interactive_auto_search.py -c workflows/auto_search_parallax_deep.yaml"
 echo ""
 
 # Create convenience functions
-chat_modal() {
-    bash scripts/chat_modal.sh "$@"
+chat_parallax() {
+    python scripts/interactive_auto_search.py -c workflows/auto_search_parallax_deep.yaml "$@"
 }
 
 launch_chat() {

@@ -36,7 +36,7 @@ Parallax Deep Research Agent (DR-Tulu) is an agentic research assistant that per
 
 - Python 3.11+
 - Docker
-- GPU (optional - can use hosted Modal endpoint)
+- GPU with Parallax running on port 3001
 
 ### 1. Clone and Setup
 
@@ -52,13 +52,8 @@ make setup
 Edit `.env` and set your Parallax endpoint:
 
 ```bash
-# Option A: Local Parallax (if you have a GPU)
+# Local Parallax (requires GPU running on port 3001)
 PARALLAX_BASE_URL=http://localhost:3001/v1
-
-# Option B: Hosted Modal endpoint you can deploy it via
-# the deploy/modal_deploy.py script (no GPU needed)
-# follow with modal deployment instructions. then set:
-PARALLAX_BASE_URL=https://<user_name>-deep-scholar-parallax-run-parallax.modal.run/v1
 ```
 
 ### 3. Start Services
@@ -131,7 +126,6 @@ Search private document collections using the MCP tool interface. Pre-configured
 ┌─────────────────────────────────────────────────────────────────┐
 │              Parallax Inference                                 │
 │   - Local: http://localhost:3001/v1                             │
-│   - Hosted: Modal deployment                                    │
 │   - Runs Qwen, DeepSeek, or other models                        │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -205,11 +199,8 @@ To add a new document collection as a separate tool:
 Create a `.env` file in the project root (or copy from `.env.example`):
 
 ```bash
-# Parallax Inference Endpoint
-# Local (with GPU):
+# Parallax Inference Endpoint (local)
 PARALLAX_BASE_URL=http://localhost:3001/v1
-# Hosted (Modal - no GPU needed):
-# PARALLAX_BASE_URL=https://aboulaakoul-elwalid--deep-scholar-parallax-run-parallax.modal.run/v1
 
 # API Keys for web search tools
 GOOGLE_AI_API_KEY=your_gemini_key
@@ -224,10 +215,10 @@ ARABIC_BOOKS_COLLECTION=arabic_books
 
 Research behavior is controlled by YAML workflow configs in `DR-Tulu/agent/workflows/`:
 
-| Config                        | Description                        |
-| ----------------------------- | ---------------------------------- |
-| `auto_search_modal.yaml`      | Quick mode - fewer iterations      |
-| `auto_search_modal_deep.yaml` | Deep mode - comprehensive research |
+| Config                          | Description                        |
+| ------------------------------- | ---------------------------------- |
+| `auto_search_parallax_quick.yaml` | Quick mode - fewer iterations      |
+| `auto_search_parallax_deep.yaml`  | Deep mode - comprehensive research |
 
 ### Open WebUI Settings
 

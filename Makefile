@@ -77,7 +77,7 @@ create-env:
 	@echo "Creating .env file..."
 	@if [ ! -f ".env" ]; then \
 		cp .env.example .env 2>/dev/null || \
-		echo '# Parallax Deep Research Agent Configuration\n\n# Parallax Inference Endpoint\n# Local (with GPU):\nPARALLAX_BASE_URL=http://localhost:3001/v1\n# Hosted (Modal - no GPU needed):\n# PARALLAX_BASE_URL=https://aboulaakoul-elwalid--deep-scholar-parallax-run-parallax.modal.run/v1\n\n# API Keys\nGOOGLE_AI_API_KEY=\nSERPER_API_KEY=\n\n# RAG Configuration\nARABIC_BOOKS_CHROMA_PATH=/home/elwalid/projects/parallax_project/chroma_db\nARABIC_BOOKS_COLLECTION=arabic_books' > .env; \
+		echo '# Parallax Deep Research Agent Configuration\n\n# Parallax Inference Endpoint (local)\nPARALLAX_BASE_URL=http://localhost:3001/v1\n\n# API Keys\nGOOGLE_AI_API_KEY=\nSERPER_API_KEY=\n\n# RAG Configuration\nARABIC_BOOKS_CHROMA_PATH=/home/elwalid/projects/parallax_project/chroma_db\nARABIC_BOOKS_COLLECTION=arabic_books' > .env; \
 		echo "  .env file created - please edit it with your settings"; \
 	else \
 		echo "  .env file already exists"; \
@@ -137,7 +137,7 @@ cli:
 		export PYTHONPATH="$(CURDIR)/DR-Tulu/agent:$$PYTHONPATH" && \
 		set -a && source DR-Tulu/agent/.env 2>/dev/null; set +a && \
 		$(PYTHON) DR-Tulu/agent/scripts/interactive_auto_search.py \
-			--config DR-Tulu/agent/workflows/auto_search_modal_deep.yaml
+			--config DR-Tulu/agent/workflows/auto_search_parallax_deep.yaml
 
 run-gateway:
 	@echo "Starting CLI Gateway on port $(GATEWAY_PORT)..."

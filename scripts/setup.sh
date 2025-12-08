@@ -9,10 +9,10 @@
 # Usage:
 #   ./scripts/setup.sh
 #
-# Options:
-#   --modal    Configure for Modal hosted endpoint (no local GPU needed)
-#   --local    Configure for local Parallax endpoint (requires GPU)
-#
+# Prerequisites:
+#   - Python 3.11+
+#   - Docker
+#   - Local Parallax running on port 3001
 
 set -e
 
@@ -30,29 +30,14 @@ VENV_PATH="$PROJECT_ROOT/DR-Tulu/agent/.venv"
 ENV_FILE="$PROJECT_ROOT/.env"
 AGENT_ENV_FILE="$PROJECT_ROOT/DR-Tulu/agent/.env"
 
-# Default endpoint
-DEFAULT_LOCAL_ENDPOINT="http://localhost:3001/v1"
-MODAL_ENDPOINT="https://aboulaakoul-elwalid--deep-scholar-parallax-run-parallax.modal.run/v1"
+# Parallax endpoint
+PARALLAX_ENDPOINT="http://localhost:3001/v1"
 
 echo -e "${BLUE}"
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║       Parallax Deep Research Agent - Setup                ║"
 echo "╚═══════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
-
-# Parse arguments
-USE_MODAL=false
-USE_LOCAL=false
-for arg in "$@"; do
-    case $arg in
-        --modal)
-            USE_MODAL=true
-            ;;
-        --local)
-            USE_LOCAL=true
-            ;;
-    esac
-done
 
 # Function to print status
 print_status() {
@@ -142,34 +127,7 @@ echo ""
 echo "Step 4: Configuring environment..."
 echo "────────────────────────────────────"
 
-# Determine endpoint
-if [ "$USE_MODAL" = true ]; then
-    ENDPOINT="$MODAL_ENDPOINT"
-    print_info "Using Modal hosted endpoint (no GPU required)"
-elif [ "$USE_LOCAL" = true ]; then
-    ENDPOINT="$DEFAULT_LOCAL_ENDPOINT"
-    print_info "Using local Parallax endpoint (GPU required)"
-else
-    # Ask user
-    echo ""
-    echo "Select your Parallax endpoint:"
-    echo ""
-    echo "  1) Local (requires GPU running Parallax on port 3001)"
-    echo "  2) Modal hosted (no GPU needed, uses cloud inference)"
-    echo ""
-    read -p "Enter choice [1/2] (default: 2): " choice
-    
-    case $choice in
-        1)
-            ENDPOINT="$DEFAULT_LOCAL_ENDPOINT"
-            print_info "Using local Parallax endpoint"
-            ;;
-        *)
-            ENDPOINT="$MODAL_ENDPOINT"
-            print_info "Using Modal hosted endpoint"
-            ;;
-    esac
-fi
+print_info "Using local Parallax endpoint: $PARALLAX_ENDPOINT"
 
 # Create .env file if it doesn't exist
 if [ ! -f "$ENV_FILE" ]; then
@@ -177,8 +135,8 @@ if [ ! -f "$ENV_FILE" ]; then
 # Parallax Deep Research Agent Configuration
 # ==========================================
 
-# Parallax Inference Endpoint
-PARALLAX_BASE_URL=$ENDPOINT
+# Parallax Inference Endpoint (local)
+PARALLAX_BASE_URL=$PARALLAX_ENDPOINT
 
 # API Keys (required for web search tools)
 GOOGLE_AI_API_KEY=
@@ -222,15 +180,18 @@ echo -e "${NC}"
 echo ""
 echo "Next steps:"
 echo ""
-echo "  1. Configure API keys in .env (GOOGLE_AI_API_KEY, SERPER_API_KEY)"
+echo "  1. Start Parallax (in another terminal):"
+echo "     ${BLUE}cd parallax && make run${NC}"
 echo ""
-echo "  2. Start the services:"
-echo "     ${BLUE}make run-all${NC}"
+echo "  2. Configure API keys in .env (GOOGLE_AI_API_KEY, SERPER_API_KEY)"
 echo ""
-echo "  3. Open the UI in your browser:"
+echo "  3. Start the Deep Research services:"
+echo "     ${BLUE}make run${NC}"
+echo ""
+echo "  4. Open the UI in your browser:"
 echo "     ${BLUE}http://localhost:3005${NC}"
 echo ""
-echo "  4. Select 'dr-tulu' or 'dr-tulu-quick' as your model"
+echo "  5. Select 'dr-tulu' or 'dr-tulu-quick' as your model"
 echo ""
-echo "Endpoint configured: $ENDPOINT"
+echo "Endpoint configured: $PARALLAX_ENDPOINT"
 echo ""

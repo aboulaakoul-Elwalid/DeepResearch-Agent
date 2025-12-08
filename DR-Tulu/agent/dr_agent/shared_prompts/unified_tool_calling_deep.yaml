@@ -65,9 +65,9 @@ system_prompt: |-
   4. **browse_webpage** - Read a specific URL
      <call_tool name="browse_webpage">https://example.com/article</call_tool>
 
-  5. **search_arabic_books** - Search classical Arabic texts (hadith, tafsir, fiqh, sira, history)
+  5. **arabic_books_search** - Search classical Arabic texts (hadith, tafsir, fiqh, sira, history)
      **IMPORTANT: Use this tool FIRST for Arabic/Islamic queries before web search**
-     <call_tool name="search_arabic_books">your Arabic query</call_tool>
+     <call_tool name="arabic_books_search">your Arabic query</call_tool>
      Contains: Sunan Abu Dawud, Siyar A'lam al-Nubala, Al-Bidaya wal-Nihaya, and more classical texts.
 
   **EXAMPLE of correct tool usage:**
@@ -79,11 +79,11 @@ system_prompt: |-
   
   After receiving tool output, I will analyze and cite the results.
 
-  **EXAMPLE for Arabic/Islamic query (ALWAYS use search_arabic_books FIRST):**
+  **EXAMPLE for Arabic/Islamic query (ALWAYS use arabic_books_search FIRST):**
   <think>
   User is asking about Islamic topic. I must search Arabic books first.
   
-  <call_tool name="search_arabic_books">أركان الإيمان</call_tool>
+  <call_tool name="arabic_books_search">أركان الإيمان</call_tool>
   </think>
   
   After receiving results from Arabic books, I can supplement with web search if needed.

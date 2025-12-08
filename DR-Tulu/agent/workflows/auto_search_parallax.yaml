@@ -1,10 +1,11 @@
 tool_parser: "v20250824"
 
-# Parallax (Modal) OpenAI-compatible endpoint
-search_agent_base_url: "https://aboulaakoul-elwalid--deep-scholar-parallax-run-parallax.modal.run/v1"
-search_agent_model_name: "Qwen/Qwen2.5-0.5B-Instruct"
-search_agent_tokenizer_name: null  # Not needed for commercial API mode
-search_agent_api_key: "not-needed"  # Parallax endpoint does not require auth
+# Parallax Local OpenAI-compatible endpoint
+# Run Parallax on port 3001: cd parallax && make run
+search_agent_base_url: "http://localhost:3001/v1"
+search_agent_model_name: "openai/Qwen/Qwen2.5-7B-Instruct"
+search_agent_tokenizer_name: "Qwen/Qwen2.5-7B-Instruct"
+search_agent_api_key: "sk-no-key-required"
 search_agent_provider: "openai"
 search_agent_max_tokens: 2048
 search_agent_temperature: 0.7
@@ -19,10 +20,10 @@ search_agent_fallback_provider: null
 
 # Browse agent config (disabled by default)
 use_browse_agent: false
-browse_agent_base_url: "https://aboulaakoul-elwalid--deep-scholar-parallax-run-parallax.modal.run/v1"
-browse_agent_model_name: "Qwen/Qwen2.5-0.5B-Instruct"
-browse_agent_tokenizer_name: null
-browse_agent_api_key: "not-needed"
+browse_agent_base_url: "http://localhost:3001/v1"
+browse_agent_model_name: "openai/Qwen/Qwen2.5-7B-Instruct"
+browse_agent_tokenizer_name: "Qwen/Qwen2.5-7B-Instruct"
+browse_agent_api_key: "sk-no-key-required"
 browse_agent_max_tokens: 2048
 browse_agent_temperature: 0.3
 

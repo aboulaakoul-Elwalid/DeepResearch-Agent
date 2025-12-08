@@ -12,8 +12,8 @@ Features:
 - Clean formatted answer
 
 Models:
-- dr-tulu-quick: Fast research with Modal Qwen-7B (fewer tool calls)
-- dr-tulu-deep: Deep research with Modal Qwen-7B (more comprehensive)
+- dr-tulu-quick: Fast research (1-5 tool calls)
+- dr-tulu-deep: Deep research (5-15 tool calls)
 - dr-tulu: Alias for dr-tulu-deep
 
 Usage:
@@ -44,17 +44,17 @@ CLI_PYTHON = AGENT_ROOT / ".venv" / "bin" / "python"
 # Model configurations - maps model name to workflow config
 MODEL_CONFIGS = {
     "dr-tulu-quick": {
-        "config": "auto_search_modal.yaml",
-        "description": "Quick research with Modal Qwen-7B (1-5 tool calls)",
+        "config": "auto_search_parallax_quick.yaml",
+        "description": "Quick research (1-5 tool calls)",
         "dataset": "short_form",
     },
     "dr-tulu-deep": {
-        "config": "auto_search_modal_deep.yaml",
-        "description": "Deep research with Modal Qwen-7B (5-15 tool calls)",
+        "config": "auto_search_parallax_deep.yaml",
+        "description": "Deep research (5-15 tool calls)",
         "dataset": "long_form",
     },
     "dr-tulu": {
-        "config": "auto_search_modal_deep.yaml",  # Default to deep
+        "config": "auto_search_parallax_deep.yaml",  # Default to deep
         "description": "Deep research (alias for dr-tulu-deep)",
         "dataset": "long_form",
     },

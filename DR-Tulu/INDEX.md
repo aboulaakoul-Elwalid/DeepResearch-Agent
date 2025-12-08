@@ -63,8 +63,8 @@ Located in `agent/workflows/`:
   - Alternative option
 
 - **[auto_search_parallax.yaml](agent/workflows/auto_search_parallax.yaml)**
-  - Modal Parallax endpoint (Qwen 0.5B, OpenAI-compatible)
-  - No API key required
+  - Local Parallax endpoint (Qwen 7B, OpenAI-compatible)
+  - Requires local GPU running Parallax on port 3001
 
 - **[auto_search_openai.yaml](agent/workflows/auto_search_openai.yaml)**
   - OpenAI API configuration
@@ -114,7 +114,7 @@ DR-Tulu/
 │   ├── workflows/
 │   │   ├── auto_search_groq.yaml   # Use this (Groq)
 │   │   ├── auto_search_gemini.yaml # Alternative (Gemini)
-│   │   ├── auto_search_parallax.yaml # Modal Parallax (OpenAI-compatible)
+│   │   ├── auto_search_parallax.yaml # Local Parallax (OpenAI-compatible)
 │   │   └── auto_search_openai.yaml # Alternative (OpenAI)
 │   └── dr_agent/                   # Source code
 ├── rl/                             # RL training code

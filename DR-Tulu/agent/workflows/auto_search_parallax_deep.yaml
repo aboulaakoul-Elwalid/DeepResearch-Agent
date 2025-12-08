@@ -1,0 +1,56 @@
+tool_parser: "v20250824"
+search_provider: "serper"  # Use Google via Serper API
+
+# =============================================================================
+# Parallax Inference - Deep Research Mode
+# =============================================================================
+# Local Parallax endpoint - run with: cd parallax && make run
+# Balanced config for 7B model context limits
+
+search_agent_base_url: "http://localhost:3001/v1"
+search_agent_model_name: "openai/Qwen/Qwen2.5-7B-Instruct"
+search_agent_tokenizer_name: "Qwen/Qwen2.5-7B-Instruct"
+search_agent_api_key: "sk-no-key-required"
+
+# Deep research settings - balanced for 7B context
+search_agent_max_tokens: 8000
+search_agent_temperature: 0.5
+search_agent_max_tool_calls: 10
+search_agent_min_tool_calls: 1  # Let model decide naturally
+
+# Force long_form output
+default_dataset_name: "long_form"
+
+# Use deep research prompt
+prompt_path: "unified_tool_calling_deep.yaml"
+
+# Browse agent - same endpoint
+use_browse_agent: true
+browse_agent_base_url: "http://localhost:3001/v1"
+browse_agent_model_name: "openai/Qwen/Qwen2.5-7B-Instruct"
+browse_agent_tokenizer_name: "Qwen/Qwen2.5-7B-Instruct"
+browse_agent_api_key: "sk-no-key-required"
+browse_agent_max_tokens: 4000
+browse_agent_temperature: 0.3
+
+# Search tool configuration - reduced to fit in 7B context
+number_documents_to_search: 6
+search_timeout: 300
+
+# Exa search
+use_exa_search: true
+exa_num_results: 5
+exa_include_domains:
+exa_exclude_domains:
+exa_use_autoprompt: true
+exa_search_type: "neural"
+
+# Arabic library MCP tool - classical Islamic texts (tafsir, hadith, fiqh, history)
+use_arabic_library: true
+arabic_library_num_results: 5
+
+# Browse tool configuration - reduced for context limits
+browse_tool_name: "jina"
+browse_timeout: 300
+browse_max_pages_to_fetch: 5
+browse_context_char_length: 3000
