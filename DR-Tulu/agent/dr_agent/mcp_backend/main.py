@@ -33,6 +33,7 @@ from .apis.exa_apis import (
     search_exa_websets,
 )
 from .local.arabic_books import search_arabic_books
+from .local.local_docs import search_local_docs
 from .apis.jina_apis import JinaWebpageResponse, fetch_webpage_content_jina
 from .cache import set_cache_enabled
 from .local.crawl4ai_fetcher import Crawl4AiResult
@@ -275,10 +276,10 @@ def exa_search(
         Optional[str],
         "Comma-separated domains to exclude (e.g., 'youtube.com,twitter.com')",
     ] = None,
-    use_autoprompt: Annotated[
-        bool, "Let Exa refine the query automatically"
-    ] = True,
-    search_type: Annotated[str, "Exa search type (e.g., 'neural', 'keyword')"] = "neural",
+    use_autoprompt: Annotated[bool, "Let Exa refine the query automatically"] = True,
+    search_type: Annotated[
+        str, "Exa search type (e.g., 'neural', 'keyword')"
+    ] = "neural",
 ) -> dict:
     """
     General web search using Exa API.
@@ -375,6 +376,37 @@ def arabic_books_search(
         item has `id`, `text`, `metadata` (book title, volume, pages, etc.), and `distance`.
     """
     return search_arabic_books(
+        query=query,
+        n_results=n_results,
+        chroma_path=chroma_path,
+        collection_name=collection_name,
+    )
+
+
+@mcp.tool(tags={"search", "necessary"})
+def local_docs_search(
+    query: Annotated[str, "Search query for your locally indexed documents"],
+    n_results: Annotated[int, "Number of passages to return (default 5, max 10)"] = 5,
+    chroma_path: Annotated[
+        Optional[str],
+        "Optional override for the Chroma persistence path (defaults to LOCAL_DOCS_CHROMA_PATH env or ./chroma_db)",
+    ] = None,
+    collection_name: Annotated[
+        Optional[str],
+        "Optional override for the Chroma collection name (defaults to LOCAL_DOCS_COLLECTION env or 'local_docs')",
+    ] = None,
+) -> dict:
+    """
+    Search your locally indexed documents (txt, md, pdf files).
+
+    Use this tool to search through documents you've indexed using `rag/ingest_local.py`.
+    This is useful for finding relevant context from your own documentation, notes, or files.
+
+    Returns:
+        Dictionary containing the query, resolved collection metadata, and a `results` list where each
+        item has `id`, `text`, `metadata` (filename, file_type, chunk_index), and `distance`.
+    """
+    return search_local_docs(
         query=query,
         n_results=n_results,
         chroma_path=chroma_path,

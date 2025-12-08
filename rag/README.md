@@ -2,6 +2,59 @@
 
 This directory contains a complete RAG (Retrieval-Augmented Generation) pipeline for processing Arabic Islamic texts from the Shamela library and ingesting them into ChromaDB for semantic search.
 
+## Index Your Own Documents (Quick Start)
+
+Drop your `.txt`, `.md`, or `.pdf` files into a folder and index them for context-aware chat:
+
+```bash
+# 1. Create a docs folder and add your files
+mkdir docs
+cp your_files/*.md docs/
+
+# 2. Run the ingestion script
+python ingest_local.py
+
+# 3. The agent can now search your docs via the local_docs_search tool!
+```
+
+### Options
+
+```bash
+# Custom input directory
+python ingest_local.py --input-dir ./my_notes
+
+# Custom ChromaDB path
+python ingest_local.py --chroma-path ./my_chroma
+
+# Clear and re-index
+python ingest_local.py --reset
+
+# Verbose output
+python ingest_local.py -v
+```
+
+### Supported Formats
+
+| Format | Extension | Notes |
+|--------|-----------|-------|
+| Plain text | `.txt` | UTF-8 recommended |
+| Markdown | `.md` | Preserves structure |
+| PDF | `.pdf` | Requires `pypdf` (`pip install pypdf`) |
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOCAL_DOCS_INPUT_DIR` | `./docs` | Default input directory |
+| `LOCAL_DOCS_CHROMA_PATH` | `./chroma_db` | ChromaDB storage path |
+| `LOCAL_DOCS_COLLECTION` | `local_docs` | Collection name |
+
+---
+
+## Arabic Books Pipeline (Full)
+
+The pipeline below is for processing the Shamela Arabic Islamic texts library.
+
 ## Quick Start
 
 ```bash
